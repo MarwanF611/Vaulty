@@ -11,6 +11,17 @@ license.workspace = true
 name = "vaulty_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# Tauri decides between the dev server and embedded assets on this feature, not
+# on the cargo profile. `cargo tauri dev` builds with --no-default-features so
+# the app loads from the Vite server; `cargo tauri build` leaves the default on
+# so `frontendDist` is embedded.
+#
+# Without it every build — release included — points at http://localhost:5173
+# and shows a blank window unless a dev server happens to be running.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

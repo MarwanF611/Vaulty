@@ -126,3 +126,70 @@ fn the_csp_allows_no_remote_origins() {
         );
     }
 }
+
+/// The bug: a hardcoded CSP `<meta>` tag in `src/app.html` renders the app as a
+/// blank white page.
+///
+/// SvelteKit bootstraps the entire application from an inline `<script>`. Any
+/// policy with a bare `script-src 'self'` blocks it, nothing mounts, and the
+/// window shows white. Tauri's own injection handles this — it generates a
+/// nonce per inline script and rewrites the policy to match (`replace_csp_nonce`
+/// in tauri's manager/mod.rs) — but only for pages it serves. A `<meta>` tag in
+/// the HTML applies unconditionally and bypasses that entirely, which breaks
+/// dev (where Tauri serves nothing and only the meta tag is in force) and
+/// hardcodes a policy that cannot carry a nonce in release.
+///
+/// The CSP belongs in `tauri.conf.json` under `app.security.csp`, which the
+/// `the_csp_allows_no_remote_origins` test above guards.
+#[test]
+fn app_html_does_not_hardcode_a_content_security_policy() {
+    let html = include_str!("../../src/app.html");
+
+    // Strip HTML comments first: the file explains *why* the policy is not set
+    // here, and that prose legitimately names the header.
+    let mut stripped = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(start) = rest.find("<!--") {
+        stripped.push_str(&rest[..start]);
+        match rest[start..].find("-->") {
+            Some(end) => rest = &rest[start + end + 3..],
+            None => {
+                rest = "";
+                break;
+            }
+        }
+    }
+    stripped.push_str(rest);
+
+    assert!(
+        !stripped.to_lowercase().contains("content-security-policy"),
+        "src/app.html hardcodes a Content-Security-Policy meta tag. That blocks \
+         SvelteKit's inline bootstrap script and renders the app blank. Configure \
+         app.security.csp in tauri.conf.json instead and let Tauri inject it."
+    );
+}
+
+/// The bug: without the `custom-protocol` feature every build — release
+/// included — points at the dev server.
+///
+/// Tauri switches between `devUrl` and the embedded `frontendDist` on this
+/// feature, not on the cargo profile (`is_dev()` in tauri-build reads
+/// `DEP_TAURI_DEV`, which `tauri/custom-protocol` drives). `cargo tauri dev`
+/// builds with `--no-default-features`; `cargo tauri build` leaves the default
+/// on. Omit it and `cargo tauri build` produces an app whose window is blank
+/// unless a Vite server happens to be listening on 5173.
+#[test]
+fn the_app_crate_declares_the_custom_protocol_feature() {
+    let manifest = include_str!("../Cargo.toml");
+
+    assert!(
+        manifest.contains("custom-protocol = [\"tauri/custom-protocol\"]"),
+        "src-tauri/Cargo.toml must define custom-protocol = [\"tauri/custom-protocol\"], \
+         otherwise release builds load from the dev server and render blank"
+    );
+    assert!(
+        manifest.contains("default = [\"custom-protocol\"]"),
+        "custom-protocol must be a default feature so `cargo build --release` \
+         embeds the frontend"
+    );
+}

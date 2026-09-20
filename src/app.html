@@ -4,13 +4,17 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!--
-      No remote origins. The vault app is offline (CLAUDE.md rule 8) and the CSP
-      is the thing that keeps an accidental fetch() from becoming a data leak.
+      The Content-Security-Policy is NOT set here. It lives in
+      src-tauri/tauri.conf.json under app.security.csp, and Tauri injects it
+      when it serves the page.
+
+      That indirection is load-bearing. SvelteKit bootstraps the whole app from
+      an inline <script>, so any policy with a bare `script-src 'self'` blocks
+      it and the app renders as a blank white page. Tauri generates a nonce per
+      inline script and rewrites the policy to match (`replace_csp_nonce` in
+      tauri's manager/mod.rs) - a hardcoded <meta> tag here bypasses that and
+      breaks the app in both dev and production.
     -->
-    <meta
-      http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost"
-    />
     <title>Vaulty</title>
     %sveltekit.head%
   </head>
