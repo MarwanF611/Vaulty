@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/vault-core", "crates/vault-cli", "src-tauri"]
+members = ["crates/vault-core", "crates/vault-cli", "crates/vault-platform", "src-tauri"]
 
 [workspace.package]
 version = "0.0.1"
