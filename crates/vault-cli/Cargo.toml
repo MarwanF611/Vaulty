@@ -1,0 +1,18 @@
+[package]
+name = "vault-cli"
+description = "Thin CLI over vault-core for manual testing. Not a shipped product surface."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "vault-cli"
+path = "src/main.rs"
+
+[dependencies]
+vault-core = { path = "../vault-core" }
+anyhow.workspace = true
+zeroize.workspace = true
+serde_json.workspace = true
+rpassword = "7.3"
