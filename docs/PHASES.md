@@ -81,12 +81,19 @@ clipboard is always restored, including when the user cancels.
 
 ## Phase 3 — macOS biometrics (1–2 weeks)
 
-- [ ] `crates/vault-platform` with a `BiometricProvider` trait
-- [ ] macOS implementation: keychain item, `kSecAccessControlBiometryCurrentSet`
+- [x] `crates/vault-platform` with a `BiometricProvider` trait
+- [x] macOS implementation: keychain item, `kSecAccessControlBiometryCurrentSet`
 - [ ] Apple Developer signing + keychain-access-groups entitlement working locally
-- [ ] Enable/disable biometrics in settings; disabling removes the keychain item
-- [ ] Password fallback on any biometric failure — never a silent unlock
-- [ ] Periodic master-password re-prompt (≈14 days)
+- [x] Enable/disable biometrics in settings; disabling removes the keychain item
+- [x] Password fallback on any biometric failure — never a silent unlock
+- [x] Periodic master-password re-prompt (≈14 days)
+
+**Status: built, not verified.** The flow is covered by tests with an injected
+keystore — enrolment, unlock, disable, every failure mode falling back to the
+password, and the 14-day window. The signing item stays unticked: an unsigned
+build cannot write the keychain item (verified — `SecItemAdd` is refused), so no
+Touch ID prompt has ever been raised. Needs the Apple Developer account.
+See `docs/PHASE3-NOTES.md`.
 
 **Exit criteria:** Touch ID unlocks a signed build. Adding a fingerprint in System Settings
 invalidates the stored key and forces the password.

@@ -2,6 +2,8 @@
   import '$lib/styles.css';
   import { listen } from '@tauri-apps/api/event';
   import {
+    biometricState,
+    unlockWithBiometrics,
     captureState,
     copySecret,
     discardCapture,
@@ -17,9 +19,11 @@
     CAPTURE_EVENT,
     ENTRY_KINDS,
     errorMessage,
+    isCmdError,
     type CapturePayload,
     type EntryKind,
-    type EntryMeta
+    type EntryMeta,
+    type BiometricState
   } from '$lib/types';
 
   let payload = $state<CapturePayload | null>(null);
@@ -45,10 +49,35 @@
   let labelInput = $state<HTMLInputElement | null>(null);
   let searchInput = $state<HTMLInputElement | null>(null);
   let passwordInput = $state<HTMLInputElement | null>(null);
+  let bio = $state<BiometricState | null>(null);
+
+  /** Offered, never fired automatically: an unprompted Touch ID sheet is startling. */
+  async function useBiometrics() {
+    if (!bio?.canUnlock) return;
+    error = '';
+    busy = true;
+    try {
+      await unlockWithBiometrics();
+      const s = await captureState();
+      payload = payload && {
+        ...payload,
+        locked: false,
+        mode: s.hasCapture ? 'capture' : 'search',
+        charCount: s.charCount
+      };
+      queueMicrotask(focusForMode);
+    } catch (e) {
+      // Never a silent unlock: fall through to the password field.
+      error = isCmdError(e) && e.code === 'biometric_cancelled' ? '' : errorMessage(e);
+    } finally {
+      busy = false;
+    }
+  }
 
   listen<CapturePayload>(CAPTURE_EVENT, (e) => {
     reset();
     payload = e.payload;
+    if (e.payload.locked) void biometricState().then((b) => (bio = b)).catch(() => (bio = null));
     // Focus lands where SPEC.md says: the label field in capture mode, the
     // search box in search mode. This is the "usable cursor" the 300 ms
     // budget is measured to.
@@ -208,18 +237,19 @@
 
 <div class="popup">
   {#if !payload}
-    <div class="idle muted">Waiting…</div>
+    <div class="idle t-callout secondary">Waiting…</div>
   {:else if payload.locked}
     <form onsubmit={doUnlock}>
       <div class="head">
-        <strong>Vaulty is locked</strong>
+        <strong class="t-headline">Vaulty is locked</strong>
         {#if payload.charCount}
-          <span class="muted">{payload.charCount} characters captured and held</span>
+          <span class="t-subheadline secondary">{payload.charCount} characters held</span>
         {/if}
       </div>
       {#if error}<div class="error">{error}</div>{/if}
       <!-- svelte-ignore a11y_autofocus -->
       <input
+        class="big"
         bind:this={passwordInput}
         type="password"
         placeholder="Master password"
@@ -228,16 +258,21 @@
         autofocus
         disabled={busy}
       />
-      <div class="hint muted">Enter to unlock · Escape to cancel</div>
+      {#if bio?.canUnlock}
+        <button type="button" class="plain bio" onclick={useBiometrics} disabled={busy}>
+          Use {bio.displayName ?? 'Touch ID'}
+        </button>
+      {/if}
+      <p class="hint t-footnote tertiary">Return to unlock · Escape to cancel</p>
     </form>
   {:else if payload.mode === 'permission_required'}
     <div class="perm">
-      <strong>Vaulty needs Accessibility permission</strong>
-      <p class="muted">
+      <strong class="t-headline">Vaulty needs Accessibility permission</strong>
+      <p class="t-callout secondary">
         To grab the text you have selected, Vaulty sends a copy keystroke to the app you
         are using. macOS gates that behind Accessibility.
       </p>
-      <p class="muted small">
+      <p class="t-subheadline tertiary">
         Without it the shortcut still opens this window, but it can only search — it
         cannot capture a selection. Vaulty does not read your screen or log your keys.
       </p>
@@ -245,14 +280,14 @@
       <div class="actions">
         <button class="primary" onclick={grant}>Grant permission</button>
         <button onclick={() => openAccessibilitySettings()}>Open System Settings</button>
-        <button class="ghost" onclick={close}>Not now</button>
+        <button class="plain" onclick={close}>Not now</button>
       </div>
     </div>
   {:else if payload.mode === 'capture'}
     <form onsubmit={doSave}>
       <div class="head">
-        <strong>Save to Vaulty</strong>
-        <span class="muted timing">{payload.elapsedMs} ms</span>
+        <strong class="t-headline">Save to Vaulty</strong>
+        <span class="t-footnote tertiary timing">{payload.elapsedMs} ms</span>
       </div>
 
       <div class="captured">
@@ -260,9 +295,9 @@
           <span class="mono val">{revealed}</span>
         {:else}
           <span class="mono val masked">{'•'.repeat(Math.min(payload.charCount ?? 0, 32))}</span>
-          <span class="muted small">{payload.charCount} characters captured</span>
+          <span class="t-subheadline secondary">{payload.charCount} characters</span>
         {/if}
-        <button type="button" class="ghost tiny" onclick={revealed === null ? doReveal : () => (revealed = null)}>
+        <button type="button" class="plain" onclick={revealed === null ? doReveal : () => (revealed = null)}>
           {revealed === null ? 'Show' : 'Hide'}
         </button>
       </div>
@@ -275,7 +310,7 @@
       <!-- svelte-ignore a11y_autofocus -->
       <input
         bind:this={labelInput}
-        placeholder="Label — what is this?"
+        class="big" placeholder="Label — what is this?"
         bind:value={label}
         autocomplete="off"
         autofocus
@@ -287,13 +322,13 @@
         </select>
         <input placeholder="tags, comma separated" bind:value={tagsText} disabled={busy} />
       </div>
-      <div class="hint muted">Enter to save · Escape to cancel</div>
+      <p class="hint t-footnote tertiary">Return to save · Escape to cancel</p>
     </form>
   {:else}
     <div>
       <div class="head">
-        <strong>Search Vaulty</strong>
-        <span class="muted timing">{payload.elapsedMs} ms</span>
+        <strong class="t-headline">Search Vaulty</strong>
+        <span class="t-footnote tertiary timing">{payload.elapsedMs} ms</span>
       </div>
       {#if copiedLabel}
         <div class="notice">Copied {copiedLabel} — clears from the clipboard shortly.</div>
@@ -302,7 +337,7 @@
       <!-- svelte-ignore a11y_autofocus -->
       <input
         bind:this={searchInput}
-        placeholder="Search labels and tags…"
+        class="big" placeholder="Search"
         bind:value={query}
         oninput={onQueryInput}
         onkeydown={onSearchKeydown}
@@ -313,56 +348,71 @@
         {#each results.slice(0, 5) as r, i (r.id)}
           <div class="hit" class:active={i === cursor}>
             <span>{r.label}</span>
-            <span class="muted small">{r.kind}</span>
+            <span class="t-subheadline secondary">{r.kind}</span>
           </div>
         {:else}
-          <div class="muted small pad">
+          <div class="t-callout secondary pad">
             {query.trim() ? 'No matches.' : 'Type to search. Enter copies.'}
           </div>
         {/each}
       </div>
-      <div class="hint muted">↑↓ to move · Enter to copy · Escape to close</div>
+      <p class="hint t-footnote tertiary">↑↓ to move · Return to copy · Escape to close</p>
     </div>
   {/if}
 </div>
 
 <style>
+  /*
+   * A floating panel in the Spotlight idiom: translucent material, one large
+   * radius, a hairline, and a heavy shadow. The window itself is transparent
+   * and undecorated, so this element *is* the window.
+   */
   .popup {
-    padding: 14px;
     height: 100vh;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 10px;
+    padding: var(--s4);
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--s3);
+    border-radius: var(--r-panel);
+    background: var(--sidebar-bg);
+    -webkit-backdrop-filter: saturate(180%) blur(30px);
+    backdrop-filter: saturate(180%) blur(30px);
+    box-shadow: var(--shadow-panel);
+    overflow: hidden;
   }
   .idle { display: grid; place-content: center; height: 100%; }
-  .head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-  .timing { font-size: 11px; font-variant-numeric: tabular-nums; }
-  form, .perm, .popup > div { display: flex; flex-direction: column; gap: 8px; }
-  .row { display: grid; grid-template-columns: 120px 1fr; gap: 8px; }
-  .hint { font-size: 11px; }
-  .small { font-size: 11px; }
-  .tiny { padding: 2px 8px; font-size: 11px; }
-  .pad { padding: 8px 2px; }
+  .head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s2); }
+  .timing { font-variant-numeric: tabular-nums; }
+  form, .perm, .popup > div { display: flex; flex-direction: column; gap: var(--s3); }
+  .row { display: grid; grid-template-columns: 120px 1fr; gap: var(--s2); }
+  .hint { margin: 0; }
+  .big { font-size: 15px; min-height: 30px; }
 
   .captured {
-    display: flex; align-items: center; gap: 8px;
-    background: var(--bg); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 8px 10px;
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    background: var(--field-bg);
+    border: 0.5px solid var(--control-border);
+    border-radius: var(--r-field);
+    padding: 7px 10px;
   }
-  .val { flex: 1; font-size: 12px; word-break: break-all; user-select: text; }
-  .masked { letter-spacing: 2px; color: var(--muted); user-select: none; }
+  .val { flex: 1; word-break: break-all; }
+  .masked { letter-spacing: 2px; color: var(--label-tertiary); }
 
-  .results { display: flex; flex-direction: column; gap: 2px; min-height: 96px; }
+  .results { display: flex; flex-direction: column; gap: 1px; min-height: 104px; }
   .hit {
-    display: flex; justify-content: space-between; gap: 8px;
-    padding: 6px 8px; border-radius: var(--radius);
-    border: 1px solid transparent; font-size: 13px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--s2);
+    padding: 6px var(--s2);
+    border-radius: var(--r-control);
   }
-  .hit.active { background: var(--panel-2); border-color: var(--accent); }
+  .hit.active { background: var(--accent); color: var(--accent-label); }
+  .hit.active .secondary { color: rgba(255, 255, 255, 0.75); }
 
-  .perm p { margin: 0; font-size: 12.5px; line-height: 1.5; }
-  .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .perm p { margin: 0; line-height: 1.5; }
+  .actions { display: flex; gap: var(--s2); flex-wrap: wrap; }
+  .bio { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 </style>

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    Required for the biometric keychain item (docs/SECURITY.md, macOS).
+    Keychain access with an access-control policy is refused outright in an
+    unsigned build - verified: SecItemAdd fails with no entitlement.
+
+    Replace TEAMID with your Apple Developer Team ID. The group must match the
+    app's bundle identifier for the item to be private to Vaulty.
+  -->
+  <key>keychain-access-groups</key>
+  <array>
+    <string>$(AppIdentifierPrefix)dev.vaulty.app</string>
+  </array>
+
+  <!--
+    Hardened Runtime is required for notarization (Phase 6). Declared now so
+    that the signing setup verified in this phase is the one that ships.
+  -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+
+  <!--
+    NOT declared, deliberately:
+      com.apple.security.network.client / .server - the app is offline in v1
+        (CLAUDE.md rule 8). If a dependency ever needs the network, this file
+        failing to grant it is the signal.
+      com.apple.security.cs.allow-unsigned-executable-memory
+      com.apple.security.cs.disable-library-validation
+  -->
+</dict>
+</plist>

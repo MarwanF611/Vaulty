@@ -70,7 +70,16 @@ export interface CmdError {
     // expired or was already consumed.
     | 'shortcut_invalid'
     | 'shortcut_taken'
-    | 'no_capture';
+    | 'no_capture'
+    // Phase 3. Every biometric failure leads to the password field; the codes
+    // exist so the interface can say something useful on the way there.
+    | 'biometrics_unavailable'
+    | 'biometrics_not_enabled'
+    | 'biometric_cancelled'
+    | 'biometric_invalidated'
+    | 'biometric_failed'
+    | 'keychain_write_failed'
+    | 'password_due';
   message: string;
 }
 
@@ -133,3 +142,31 @@ export interface Settings {
 
 /** The event name the popup listens on. Must match popup.rs. */
 export const CAPTURE_EVENT = 'vaulty://capture';
+
+// ------------------------------------------------------------ Phase 3
+
+export type BiometricAvailability =
+  | 'available'
+  | 'not_enrolled'
+  | 'no_hardware'
+  | 'locked_out'
+  | 'unsupported';
+
+export interface BiometricState {
+  availability: BiometricAvailability;
+  /** "Touch ID", "Face ID", "Windows Hello", or null. */
+  displayName: string | null;
+  /** A biometric slot exists in the vault header. */
+  enabled: boolean;
+  /** A key exists in the OS keystore for this vault. */
+  keyPresent: boolean;
+  /** The master password is due regardless of biometrics. */
+  passwordDue: boolean;
+  daysUntilPasswordDue: number;
+  /** Every precondition holds; a biometric unlock can be attempted. */
+  canUnlock: boolean;
+}
+
+export interface BiometricUnlockOutcome {
+  status: VaultStatus;
+}

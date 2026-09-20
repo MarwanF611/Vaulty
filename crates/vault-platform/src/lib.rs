@@ -28,15 +28,22 @@
     warn(clippy::unwrap_used, clippy::expect_used, clippy::panic)
 )]
 
+mod biometrics;
 mod error;
 mod permissions;
 
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "macos")]
+mod macos_keychain;
 #[cfg(target_os = "windows")]
 #[path = "windows_impl.rs"]
 mod windows_impl;
 
+pub use biometrics::{
+    provider, BiometricAvailability, BiometricFailure, BiometricProvider, BiometryKind,
+    UnsupportedProvider,
+};
 pub use error::{PlatformError, Result};
 pub use permissions::{
     accessibility_status, open_accessibility_settings, prompt_for_accessibility, PermissionStatus,

@@ -6,6 +6,7 @@
   import EntryForm from '$lib/components/EntryForm.svelte';
   import EntryDetail from '$lib/components/EntryDetail.svelte';
   import Settings from '$lib/components/Settings.svelte';
+  import KindIcon from '$lib/components/KindIcon.svelte';
 
   let status = $state<VaultStatus | null>(null);
   let entries = $state<EntryMeta[]>([]);
@@ -36,14 +37,11 @@
   async function refreshEntries() {
     try {
       entries = query.trim() ? await searchEntries(query) : await listEntries();
-      // Drop a selection that no longer exists (deleted, or filtered out).
       if (selectedId && !entries.some((e) => e.id === selectedId)) {
         selectedId = null;
         if (mode !== 'add') mode = 'view';
       }
     } catch (e) {
-      // A locked vault mid-session means something re-locked it; go back
-      // to the unlock screen rather than showing a stale list.
       if (isCmdError(e) && e.code === 'locked') {
         entries = [];
         await refreshStatus();
@@ -60,8 +58,6 @@
   }
 
   async function doLock() {
-    // Clear the UI first, so nothing from the session is on screen while the
-    // lock round-trips.
     entries = [];
     selectedId = null;
     query = '';
@@ -86,46 +82,53 @@
     void refreshEntries();
   }
 
-  const fmtUsed = (e: EntryMeta) =>
-    e.lastUsedAt ? `used ${new Date(e.lastUsedAt * 1000).toLocaleDateString()}` : '';
 </script>
 
 <svelte:head><title>Vaulty</title></svelte:head>
 
 {#if loading}
-  <div class="center muted">Loading…</div>
+  <div class="center secondary t-callout">Loading…</div>
 {:else if !unlocked && status}
   <Unlock {status} {onUnlocked} />
 {:else if status}
   <div class="app">
-    <aside>
-      <div class="side-head">
-        <input
-          class="search"
-          placeholder="Search labels and tags…"
-          bind:value={query}
-          oninput={onSearchInput}
-          autocomplete="off"
-        />
-        <button class="primary add" onclick={() => { mode = 'add'; selectedId = null; }}>+</button>
+    <!-- Sidebar: translucent, like Finder and Mail. The top padding clears the
+         traffic lights, which float over it with titleBarStyle: Overlay. -->
+    <aside data-tauri-drag-region>
+      <div class="toolbar" data-tauri-drag-region>
+        <div class="search-wrap">
+          <svg class="search-icon" width="12" height="12" viewBox="0 0 16 16" fill="none">
+            <circle cx="7" cy="7" r="4.6" stroke="currentColor" stroke-width="1.6" />
+            <path d="M10.6 10.6 14 14" stroke="currentColor" stroke-width="1.6"
+              stroke-linecap="round" />
+          </svg>
+          <input class="search" placeholder="Search" bind:value={query}
+            oninput={onSearchInput} autocomplete="off" />
+        </div>
+        <button class="add" title="New entry" aria-label="New entry"
+          onclick={() => { mode = 'add'; selectedId = null; }}>
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+            <path d="M8 2.6v10.8M2.6 8h10.8" stroke="currentColor" stroke-width="1.8"
+              stroke-linecap="round" />
+          </svg>
+        </button>
       </div>
 
       <div class="list">
         {#if entries.length === 0}
-          <p class="empty muted">
-            {query.trim() ? 'No matches.' : 'No entries yet. Press + to add one.'}
+          <p class="empty secondary t-callout">
+            {query.trim() ? 'No results' : 'No entries yet.'}
           </p>
         {:else}
           {#each entries as e (e.id)}
-            <button
-              class="row"
-              class:active={e.id === selectedId && mode === 'view'}
-              onclick={() => { selectedId = e.id; mode = 'view'; }}
-            >
-              <span class="row-label">{e.label}</span>
-              <span class="row-sub muted">
-                {e.kind}{e.tags.length ? ` · ${e.tags.join(', ')}` : ''}
-                {#if fmtUsed(e)}<span class="used"> · {fmtUsed(e)}</span>{/if}
+            <button class="row" class:active={e.id === selectedId && mode === 'view'}
+              onclick={() => { selectedId = e.id; mode = 'view'; }}>
+              <span class="glyph"><KindIcon kind={e.kind} /></span>
+              <span class="row-text">
+                <span class="row-label t-body">{e.label}</span>
+                <span class="row-sub t-subheadline">
+                  {e.kind}{e.tags.length ? ` · ${e.tags.join(', ')}` : ''}
+                </span>
               </span>
             </button>
           {/each}
@@ -133,35 +136,32 @@
       </div>
 
       <footer>
-        <button class="ghost lock" onclick={doLock}>Lock vault</button>
-        <button class="ghost lock" onclick={() => (mode = 'settings')}>Settings</button>
-        <span class="count muted">{entries.length}</span>
+        <button class="plain" onclick={doLock}>Lock</button>
+        <button class="plain" onclick={() => (mode = 'settings')}>Settings</button>
+        <span class="count t-footnote tertiary">{entries.length}</span>
       </footer>
     </aside>
 
     <main>
-      {#if error}<div class="error">{error}</div>{/if}
+      {#if error}<div class="banner error">{error}</div>{/if}
 
       {#if mode === 'settings'}
         <Settings onClose={() => (mode = 'view')} />
       {:else if mode === 'add'}
         <EntryForm onSaved={onSaved} onCancel={() => (mode = 'view')} />
       {:else if mode === 'edit' && selected}
-        <!-- Keyed so switching entries always gets a fresh form rather than
-             one still holding the previous entry's fields. -->
         {#key selected.id}
           <EntryForm existing={selected} onSaved={onSaved} onCancel={() => (mode = 'view')} />
         {/key}
       {:else if selected}
-        <EntryDetail
-          entry={selected}
-          onEdit={() => (mode = 'edit')}
-          onDeleted={() => { selectedId = null; void refreshEntries(); }}
-        />
+        <EntryDetail entry={selected} onEdit={() => (mode = 'edit')}
+          onDeleted={() => { selectedId = null; void refreshEntries(); }} />
       {:else}
-        <div class="center muted">
-          <p>Select an entry, or press + to add one.</p>
-          <p class="tiny">Vault {status.vaultId?.slice(0, 13)} · format v{status.formatVersion}</p>
+        <div class="placeholder">
+          <p class="t-title-3 secondary">No Selection</p>
+          <p class="t-footnote tertiary">
+            Vault {status.vaultId?.slice(0, 13)} · format v{status.formatVersion}
+          </p>
         </div>
       {/if}
     </main>
@@ -169,31 +169,92 @@
 {/if}
 
 <style>
-  .center { display: grid; place-content: center; min-height: 100vh; text-align: center; gap: 6px; }
-  .tiny { font-size: 11px; }
+  .center { display: grid; place-content: center; min-height: 100vh; }
 
-  .app { display: grid; grid-template-columns: 300px 1fr; height: 100vh; }
-  aside { display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--panel); min-width: 0; }
-  .side-head { display: flex; gap: 6px; padding: 12px; border-bottom: 1px solid var(--border); }
-  .search { font-size: 13px; }
-  .add { padding: 7px 11px; font-size: 16px; line-height: 1; }
-
-  .list { flex: 1; overflow-y: auto; padding: 6px; }
-  .empty { padding: 20px 12px; font-size: 13px; text-align: center; }
-  .row {
-    display: block; width: 100%; text-align: left; background: transparent;
-    border: 1px solid transparent; border-radius: var(--radius);
-    padding: 8px 10px; margin-bottom: 2px; cursor: pointer;
+  .app {
+    display: grid;
+    grid-template-columns: 248px 1fr;
+    height: 100vh;
+    background: var(--content-bg);
   }
-  .row:hover { background: var(--panel-2); border-color: transparent; }
-  .row.active { background: var(--panel-2); border-color: var(--accent); }
-  .row-label { display: block; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .row-sub { display: block; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .used { opacity: 0.7; }
 
-  footer { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-top: 1px solid var(--border); }
-  .lock { font-size: 12.5px; }
-  .count { font-size: 12px; }
+  aside {
+    display: flex;
+    flex-direction: column;
+    background: var(--sidebar-bg);
+    -webkit-backdrop-filter: saturate(180%) blur(24px);
+    backdrop-filter: saturate(180%) blur(24px);
+    border-right: 0.5px solid var(--separator);
+    min-width: 0;
+  }
 
-  main { padding: 24px; overflow-y: auto; min-width: 0; }
+  /* 28px clears the traffic lights. */
+  .toolbar {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    padding: 34px var(--s2) var(--s2);
+  }
+  .search-wrap { position: relative; flex: 1; min-width: 0; }
+  .search-icon {
+    position: absolute;
+    left: 7px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--label-tertiary);
+    pointer-events: none;
+  }
+  .search { padding-left: 24px; border-radius: var(--r-control); }
+  .add { flex: none; padding: 0; width: 24px; display: grid; place-items: center; }
+
+  .list { flex: 1; overflow-y: auto; padding: 0 var(--s2) var(--s2); }
+  .empty { padding: var(--s5) var(--s2); text-align: center; margin: 0; }
+
+  .row {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    border-radius: var(--r-control);
+    padding: 5px var(--s2);
+    margin-bottom: 1px;
+    min-height: 34px;
+  }
+  .row:hover:not(.active) { background: var(--fill-quaternary); }
+  /* Selected rows in a macOS sidebar are a filled accent pill. */
+  .row.active { background: var(--accent); color: var(--accent-label); }
+  .row.active .row-sub { color: rgba(255, 255, 255, 0.72); }
+  .glyph { flex: none; display: grid; place-items: center; width: 16px; opacity: 0.72; }
+  .row-text { min-width: 0; display: flex; flex-direction: column; }
+  .row-label,
+  .row-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row-sub { color: var(--label-secondary); }
+
+  footer {
+    display: flex;
+    align-items: center;
+    gap: var(--s1);
+    padding: 6px var(--s2);
+    border-top: 0.5px solid var(--separator);
+  }
+  footer .count { margin-left: auto; }
+
+  main {
+    padding: 34px var(--s6) var(--s6);
+    overflow-y: auto;
+    min-width: 0;
+    background: var(--content-bg);
+  }
+  .placeholder {
+    display: grid;
+    place-content: center;
+    height: 100%;
+    text-align: center;
+    gap: var(--s1);
+  }
+  .placeholder p { margin: 0; }
 </style>

@@ -26,15 +26,53 @@ pub const DEFAULT_SHORTCUT: &str = if cfg!(target_os = "macos") {
 /// SPEC.md: "Clipboard auto-clears 30 seconds after a copy".
 pub const DEFAULT_CLIPBOARD_CLEAR_SECONDS: u64 = 30;
 
+/// SECURITY.md: "Re-prompt for the master password roughly every 14 days so it
+/// stays in muscle memory."
+///
+/// This is not a security control — biometrics is already gated by the OS. It
+/// exists so that the one credential with no recovery path does not quietly
+/// fade out of the user's memory over months of Touch ID.
+pub const DEFAULT_PASSWORD_REPROMPT_DAYS: u64 = 14;
+
+const MIN_PASSWORD_REPROMPT_DAYS: u64 = 1;
+const MAX_PASSWORD_REPROMPT_DAYS: u64 = 90;
+
 /// Refuse absurd values from a hand-edited file, in both directions.
 const MIN_CLIPBOARD_CLEAR_SECONDS: u64 = 5;
 const MAX_CLIPBOARD_CLEAR_SECONDS: u64 = 600;
+
+/// Unix seconds.
+///
+/// `vault_core` keeps its own clock helper crate-private, which is the right
+/// boundary — this is the app layer's copy rather than a reason to widen that
+/// API.
+pub fn now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     pub shortcut: String,
     pub clipboard_clear_seconds: u64,
+    /// How often the master password must be entered even when biometrics is on.
+    #[serde(default = "default_reprompt_days")]
+    pub password_reprompt_days: u64,
+    /// Unix seconds of the last unlock that used the master password.
+    ///
+    /// Not secret, and not security-relevant: the worst an attacker who edits
+    /// it can do is make Vaulty ask for the password *less* often, and they
+    /// still cannot read the keychain item or the vault without a biometric or
+    /// the password itself.
+    #[serde(default)]
+    pub last_password_unlock_at: Option<i64>,
+}
+
+fn default_reprompt_days() -> u64 {
+    DEFAULT_PASSWORD_REPROMPT_DAYS
 }
 
 impl Default for Settings {
@@ -42,6 +80,8 @@ impl Default for Settings {
         Self {
             shortcut: DEFAULT_SHORTCUT.to_string(),
             clipboard_clear_seconds: DEFAULT_CLIPBOARD_CLEAR_SECONDS,
+            password_reprompt_days: DEFAULT_PASSWORD_REPROMPT_DAYS,
+            last_password_unlock_at: None,
         }
     }
 }
@@ -58,7 +98,37 @@ impl Settings {
         self.clipboard_clear_seconds = self
             .clipboard_clear_seconds
             .clamp(MIN_CLIPBOARD_CLEAR_SECONDS, MAX_CLIPBOARD_CLEAR_SECONDS);
+        self.password_reprompt_days = self
+            .password_reprompt_days
+            .clamp(MIN_PASSWORD_REPROMPT_DAYS, MAX_PASSWORD_REPROMPT_DAYS);
         self
+    }
+
+    /// Whether the master password is due, regardless of biometrics.
+    ///
+    /// A vault that has never been unlocked with a password in this record is
+    /// treated as due: failing towards asking for the password is the safe
+    /// direction, and it costs one extra unlock.
+    pub fn password_reprompt_due(&self, now: i64) -> bool {
+        let Some(last) = self.last_password_unlock_at else {
+            return true;
+        };
+        // A clock that has gone backwards should not lock anyone out of
+        // biometrics forever, but it also should not extend the window.
+        if now < last {
+            return true;
+        }
+        let elapsed_days = (now - last) / 86_400;
+        elapsed_days >= self.password_reprompt_days as i64
+    }
+
+    /// Days remaining before the master password is asked for again.
+    pub fn days_until_reprompt(&self, now: i64) -> i64 {
+        let Some(last) = self.last_password_unlock_at else {
+            return 0;
+        };
+        let elapsed_days = (now.saturating_sub(last)) / 86_400;
+        (self.password_reprompt_days as i64 - elapsed_days).max(0)
     }
 
     /// Settings live beside the vault file.
@@ -97,7 +167,82 @@ mod tests {
     fn defaults_are_the_documented_ones() {
         let s = Settings::default();
         assert_eq!(s.clipboard_clear_seconds, 30);
+        assert_eq!(s.password_reprompt_days, 14);
         assert!(s.shortcut.contains("Shift+Space"));
+    }
+
+    const DAY: i64 = 86_400;
+
+    #[test]
+    fn a_vault_never_unlocked_by_password_is_due_immediately() {
+        let s = Settings::default();
+        assert!(s.last_password_unlock_at.is_none());
+        assert!(s.password_reprompt_due(1_700_000_000));
+        assert_eq!(s.days_until_reprompt(1_700_000_000), 0);
+    }
+
+    #[test]
+    fn the_password_comes_due_after_the_configured_window() {
+        let now = 1_700_000_000;
+        let s = Settings {
+            last_password_unlock_at: Some(now),
+            ..Settings::default()
+        };
+
+        assert!(!s.password_reprompt_due(now));
+        assert!(!s.password_reprompt_due(now + 13 * DAY));
+        assert!(s.password_reprompt_due(now + 14 * DAY));
+        assert!(s.password_reprompt_due(now + 400 * DAY));
+
+        assert_eq!(s.days_until_reprompt(now), 14);
+        assert_eq!(s.days_until_reprompt(now + 10 * DAY), 4);
+        assert_eq!(s.days_until_reprompt(now + 99 * DAY), 0);
+    }
+
+    /// A clock that jumps backwards must not hand out an indefinite biometric
+    /// window.
+    #[test]
+    fn a_backwards_clock_makes_the_password_due() {
+        let now = 1_700_000_000;
+        let s = Settings {
+            last_password_unlock_at: Some(now),
+            ..Settings::default()
+        };
+        assert!(s.password_reprompt_due(now - DAY));
+    }
+
+    #[test]
+    fn the_reprompt_window_is_clamped() {
+        let s = Settings {
+            password_reprompt_days: 0,
+            ..Settings::default()
+        }
+        .sanitised();
+        assert!(s.password_reprompt_days >= 1);
+
+        let s = Settings {
+            password_reprompt_days: 100_000,
+            ..Settings::default()
+        }
+        .sanitised();
+        assert!(s.password_reprompt_days <= 90);
+    }
+
+    /// Settings files written before Phase 3 have neither new field.
+    #[test]
+    fn a_pre_phase_3_settings_file_still_loads() {
+        let dir = TempDir::new().unwrap();
+        let vault = dir.path().join("vault.db");
+        std::fs::write(
+            Settings::path_for_vault(&vault),
+            br#"{"shortcut":"CmdOrCtrl+Shift+Space","clipboardClearSeconds":45}"#,
+        )
+        .unwrap();
+
+        let s = Settings::load(&vault);
+        assert_eq!(s.clipboard_clear_seconds, 45);
+        assert_eq!(s.password_reprompt_days, DEFAULT_PASSWORD_REPROMPT_DAYS);
+        assert!(s.last_password_unlock_at.is_none());
     }
 
     #[test]
@@ -108,6 +253,7 @@ mod tests {
         let s = Settings {
             shortcut: "CmdOrCtrl+Alt+V".into(),
             clipboard_clear_seconds: 45,
+            ..Settings::default()
         };
         s.save(&vault).unwrap();
 

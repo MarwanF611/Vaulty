@@ -19,22 +19,25 @@
         "minWidth": 560,
         "minHeight": 420,
         "resizable": true,
-        "center": true
+        "center": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
       },
       {
         "label": "popup",
         "title": "Vaulty Capture",
         "url": "popup",
         "width": 520,
-        "height": 300,
+        "height": 320,
         "resizable": false,
         "decorations": false,
-        "transparent": false,
+        "transparent": true,
         "center": true,
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "focus": false,
-        "visible": false
+        "visible": false,
+        "shadow": false
       }
     ],
     "security": {
@@ -55,6 +58,13 @@
     ],
     "category": "Utility",
     "shortDescription": "A local-first secrets vault",
-    "longDescription": "Select text anywhere, press the shortcut, give it a label - encrypted on disk."
+    "longDescription": "Select text anywhere, press the shortcut, give it a label - encrypted on disk.",
+    "macOS": {
+      "entitlements": "entitlements.plist",
+      "minimumSystemVersion": "11.0",
+      "hardenedRuntime": true,
+      "signingIdentity": null,
+      "providerShortName": null
+    }
   }
 }

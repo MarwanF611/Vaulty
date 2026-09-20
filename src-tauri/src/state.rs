@@ -15,7 +15,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use vault_core::Vault;
-use vault_platform::CapturedText;
+use vault_platform::{BiometricProvider, CapturedText};
 
 use crate::error::{CmdError, CmdResult};
 use crate::settings::Settings;
@@ -50,10 +50,22 @@ pub struct AppState {
     /// Milliseconds for the last capture sequence, for the measured exit
     /// criterion in `docs/PHASES.md`.
     last_capture_ms: Mutex<Option<u64>>,
+    /// The OS keystore behind Touch ID / Hello. Phase 3.
+    biometrics: Box<dyn BiometricProvider>,
 }
 
 impl AppState {
     pub fn new(path: PathBuf) -> Self {
+        Self::with_biometrics(path, vault_platform::provider())
+    }
+
+    /// Construct with an explicit keystore backend.
+    ///
+    /// The real one needs a signed app with the keychain entitlement, which
+    /// `cargo test` does not have. Injecting the provider means the enable /
+    /// unlock / disable logic is covered by tests on any machine, leaving only
+    /// the Keychain FFI itself to be verified on a signed build.
+    pub fn with_biometrics(path: PathBuf, biometrics: Box<dyn BiometricProvider>) -> Self {
         let settings = Settings::load(&path);
         Self {
             vault: Mutex::new(None),
@@ -61,7 +73,35 @@ impl AppState {
             settings: Mutex::new(settings),
             pending: Mutex::new(None),
             last_capture_ms: Mutex::new(None),
+            biometrics,
         }
+    }
+
+    pub fn biometrics(&self) -> &dyn BiometricProvider {
+        self.biometrics.as_ref()
+    }
+
+    /// The keychain account for this vault.
+    ///
+    /// Keyed by vault id, so two vaults on one machine cannot collide and a
+    /// stored key cannot be pointed at a different vault. Readable while
+    /// locked, which is what lets the biometric prompt happen before unlock.
+    pub fn keychain_account(&self) -> CmdResult<String> {
+        let mut guard = self.vault.lock().map_err(|_| Self::poisoned())?;
+        let vault = guard.as_mut().ok_or_else(CmdError::locked)?;
+        Ok(vault.vault_id().to_string())
+    }
+
+    /// Record that the master password was just used. Drives the 14-day
+    /// re-prompt (SECURITY.md).
+    pub fn record_password_unlock(&self, now: i64) -> CmdResult<()> {
+        let current = self.settings()?;
+        let next = Settings {
+            last_password_unlock_at: Some(now),
+            ..current
+        };
+        self.set_settings(next)?;
+        Ok(())
     }
 
     pub fn path(&self) -> &PathBuf {

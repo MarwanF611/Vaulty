@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use uuid::Uuid;
-use vault_core::{EntryKind, EntryMeta, EntryUpdate, NewEntry, Vault};
+use vault_core::{EntryKind, EntryMeta, EntryUpdate, NewEntry, SlotKind, Vault};
 use zeroize::Zeroizing;
 
 use crate::error::{CmdError, CmdResult};
@@ -185,6 +185,11 @@ pub fn create_vault(state: State<'_, AppState>, password: String) -> CmdResult<V
 
     let vault = Vault::create(state.path(), password.as_bytes())?;
     state.set_vault(Some(vault))?;
+
+    // Creating a vault *is* a password event — the user just typed it twice.
+    // Without this the first biometric unlock would be refused as overdue,
+    // because the 14-day window has nothing to measure from.
+    let _ = state.record_password_unlock(crate::settings::now());
     vault_status(state)
 }
 
@@ -196,6 +201,9 @@ pub fn unlock_vault(state: State<'_, AppState>, password: String) -> CmdResult<V
     // On failure the vault is dropped here, so nothing half-opened is retained.
     vault.unlock(password.as_bytes())?;
     state.set_vault(Some(vault))?;
+
+    // Resets the 14-day window. A biometric unlock deliberately does not.
+    let _ = state.record_password_unlock(crate::settings::now());
     vault_status(state)
 }
 
@@ -544,4 +552,234 @@ pub fn set_clipboard_clear_seconds(
         ..current
     };
     Ok(state.set_settings(next)?.into())
+}
+
+// ========================================================= Phase 3: biometrics
+
+/// Everything the interface needs to decide what to offer.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BiometricState {
+    /// "available" | "not_enrolled" | "no_hardware" | "locked_out" | "unsupported"
+    pub availability: &'static str,
+    /// "Touch ID", "Face ID", "Windows Hello", or null.
+    pub display_name: Option<&'static str>,
+    /// A biometric slot exists in the vault header.
+    pub enabled: bool,
+    /// A key exists in the OS keystore for this vault.
+    ///
+    /// Can be false while `enabled` is true — the user removed the keychain
+    /// item, or a different machine holds the vault file. The interface should
+    /// offer to re-enrol rather than a biometric unlock that cannot work.
+    pub key_present: bool,
+    /// The master password is due regardless of biometrics.
+    pub password_due: bool,
+    pub days_until_password_due: i64,
+    /// Whether a biometric unlock can be attempted right now.
+    pub can_unlock: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BiometricUnlockOutcome {
+    pub status: VaultStatus,
+}
+
+fn biometric_state_inner(state: &AppState) -> CmdResult<BiometricState> {
+    let availability = state.biometrics().availability();
+    let settings = state.settings()?;
+    let now = crate::settings::now();
+
+    // Reading the header does not require the vault to be unlocked — that is
+    // what lets the biometric prompt happen before any unlock.
+    let (enabled, account) = match Vault::open(state.path()) {
+        Ok(v) => (
+            v.has_slot(SlotKind::Biometric),
+            Some(v.vault_id().to_string()),
+        ),
+        // No vault yet: nothing to enrol against.
+        Err(_) => (false, None),
+    };
+
+    let key_present = account
+        .as_deref()
+        .map(|a| state.biometrics().exists(a))
+        .unwrap_or(false);
+
+    let password_due = settings.password_reprompt_due(now);
+
+    Ok(BiometricState {
+        availability: availability.as_str(),
+        display_name: availability.kind().map(|k| k.display_name()),
+        enabled,
+        key_present,
+        password_due,
+        // Every condition has to hold. Failing closed here is the difference
+        // between "offer Touch ID" and "offer Touch ID and then fail".
+        can_unlock: availability.is_available() && enabled && key_present && !password_due,
+        days_until_password_due: settings.days_until_reprompt(now),
+    })
+}
+
+#[tauri::command]
+pub fn biometric_state(state: State<'_, AppState>) -> CmdResult<BiometricState> {
+    biometric_state_inner(&state)
+}
+
+/// Turn on biometric unlock.
+///
+/// Requires the master password even though the vault is already open: adding
+/// a second way in should cost the credential it is being added alongside, not
+/// merely an unlocked window someone walked up to.
+#[tauri::command]
+pub fn enable_biometrics(
+    state: State<'_, AppState>,
+    password: String,
+) -> CmdResult<BiometricState> {
+    let password = Zeroizing::new(password);
+
+    let availability = state.biometrics().availability();
+    if !availability.is_available() {
+        return Err(CmdError::new(
+            "biometrics_unavailable",
+            match availability {
+                vault_platform::BiometricAvailability::NotEnrolled(k) => format!(
+                    "{} is set up on this Mac but no fingerprint is enrolled.",
+                    k.display_name()
+                ),
+                vault_platform::BiometricAvailability::LockedOut(k) => format!(
+                    "{} is locked. Unlock with your password once to re-enable it.",
+                    k.display_name()
+                ),
+                _ => "Biometric unlock is not available on this machine.".to_string(),
+            },
+        ));
+    }
+
+    let account = state.keychain_account()?;
+
+    // A fresh key-encryption key. Never the password, never the vault key
+    // (SECURITY.md: "Never store the master password itself in the keystore").
+    let mut kek = Zeroizing::new([0u8; 32]);
+    vault_core::crypto::random_bytes(kek.as_mut());
+
+    state.with_vault(|v| {
+        v.verify_password(password.as_bytes())?;
+
+        // Store first: if the keychain write fails there is no slot pointing at
+        // a key that does not exist.
+        state
+            .biometrics()
+            .store(&account, kek.as_ref())
+            .map_err(|_| {
+                CmdError::new(
+                    "keychain_write_failed",
+                    "Could not save the key to the keychain. This needs a signed build \
+                     with the keychain entitlement.",
+                )
+            })?;
+
+        // And if the slot fails, take the orphaned keychain item back out.
+        if let Err(e) = v.enable_keystore_unlock(SlotKind::Biometric, &kek) {
+            let _ = state.biometrics().delete(&account);
+            return Err(e.into());
+        }
+        Ok(())
+    })?;
+
+    // Enrolling required the master password, so the window restarts here too.
+    let _ = state.record_password_unlock(crate::settings::now());
+
+    biometric_state_inner(&state)
+}
+
+/// Turn biometric unlock off, and remove the stored key.
+///
+/// `docs/PHASES.md`: "disabling removes the keychain item". Leaving it behind
+/// would mean a key for this vault sitting in the keychain that nothing
+/// references and nobody expects.
+#[tauri::command]
+pub fn disable_biometrics(state: State<'_, AppState>) -> CmdResult<BiometricState> {
+    let account = state.keychain_account()?;
+
+    state.with_vault(|v| {
+        v.disable_keystore_unlock(SlotKind::Biometric)?;
+        Ok(())
+    })?;
+
+    // Best effort: the slot is already gone, so a stale keychain item cannot
+    // unlock anything. Report success rather than leaving the UI inconsistent.
+    let _ = state.biometrics().delete(&account);
+
+    biometric_state_inner(&state)
+}
+
+/// Unlock with Touch ID.
+///
+/// SECURITY.md: "Never fall back silently: if biometrics fails, show the
+/// password field — do not unlock." Every failure path here returns an error
+/// and leaves the vault locked; none of them unlock, and none of them retry.
+#[tauri::command]
+pub fn unlock_with_biometrics(state: State<'_, AppState>) -> CmdResult<BiometricUnlockOutcome> {
+    let settings = state.settings()?;
+    if settings.password_reprompt_due(crate::settings::now()) {
+        return Err(CmdError::new(
+            "password_due",
+            "It has been a while - please unlock with your master password.",
+        ));
+    }
+
+    let mut vault = Vault::open(state.path())?;
+    if !vault.has_slot(SlotKind::Biometric) {
+        return Err(CmdError::new(
+            "biometrics_not_enabled",
+            "Biometric unlock is not set up for this vault.",
+        ));
+    }
+    let account = vault.vault_id().to_string();
+
+    // This call is what raises the prompt.
+    let kek = state
+        .biometrics()
+        .load(&account, "Unlock your Vaulty vault")
+        .map_err(|failure| {
+            use vault_platform::BiometricFailure as F;
+            let message = match failure {
+                F::Cancelled => "Cancelled.",
+                F::NotRecognised => "Not recognised. Use your master password.",
+                F::LockedOut => {
+                    "Too many attempts. Unlock with your master password to re-enable Touch ID."
+                }
+                F::NotFound => "No stored key for this vault. Set up biometric unlock again.",
+                F::Invalidated => {
+                    "Your fingerprints changed, so the stored key was discarded. \
+                     Unlock with your master password and set it up again."
+                }
+                F::Unavailable => "Biometric unlock is not available right now.",
+            };
+            CmdError::new(
+                match failure {
+                    F::Cancelled => "biometric_cancelled",
+                    F::Invalidated => "biometric_invalidated",
+                    _ => "biometric_failed",
+                },
+                message,
+            )
+        })?;
+
+    let raw: [u8; 32] = kek
+        .as_slice()
+        .try_into()
+        .map_err(|_| CmdError::new("biometric_failed", "The stored key is not usable."))?;
+
+    // A wrong key is an auth failure, not a silent unlock: the vault stays
+    // locked and the caller shows the password field.
+    vault.unlock_with_keystore_key(&raw, SlotKind::Biometric)?;
+    state.set_vault(Some(vault))?;
+
+    // Deliberately does *not* call record_password_unlock: the whole point of
+    // the 14-day window is that biometrics cannot keep extending it.
+    Ok(BiometricUnlockOutcome {
+        status: vault_status(state)?,
+    })
 }

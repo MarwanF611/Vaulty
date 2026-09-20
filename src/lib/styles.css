@@ -1,75 +1,300 @@
+/*
+ * Vaulty — macOS design language.
+ *
+ * Follows Apple's Human Interface Guidelines for macOS rather than inventing a
+ * look: system colours, the SF type scale, 8pt spacing, and the standard
+ * control shapes. The point is that a security tool should feel like it
+ * belongs to the OS it is guarding — an app that looks foreign is an app that
+ * looks untrustworthy.
+ *
+ * Colours are the published system values. They are defined as tokens so light
+ * and dark are one switch, and so an accent-colour setting can be wired to
+ * --accent later without touching a component.
+ */
+
+/* ---------------------------------------------------------------- tokens */
+
 :root {
-  --bg: #0f1115;
-  --panel: #171a21;
-  --panel-2: #1e222b;
-  --border: #2a2f3a;
-  --text: #e6e8ee;
-  --muted: #9aa3b2;
-  --accent: #60a5fa;
-  --danger: #f87171;
-  --ok: #4ade80;
-  --radius: 8px;
-  color-scheme: dark;
+  /* Light appearance (HIG: standard light) */
+  --window-bg: #ececec;
+  --sidebar-bg: rgba(246, 246, 246, 0.72);
+  --content-bg: #ffffff;
+  --control-bg: #ffffff;
+  --control-bg-hover: #f5f5f5;
+  --control-border: rgba(0, 0, 0, 0.12);
+  --field-bg: #ffffff;
+
+  --label: rgba(0, 0, 0, 0.85);
+  --label-secondary: rgba(0, 0, 0, 0.5);
+  --label-tertiary: rgba(0, 0, 0, 0.26);
+  --separator: rgba(0, 0, 0, 0.1);
+  --fill-quaternary: rgba(0, 0, 0, 0.05);
+
+  /* System colours */
+  --accent: #007aff;
+  --accent-hover: #0071eb;
+  --accent-label: #ffffff;
+  --red: #ff3b30;
+  --green: #34c759;
+  --orange: #ff9500;
+
+  --focus-ring: rgba(0, 122, 255, 0.5);
+  --shadow-control: 0 0.5px 1px rgba(0, 0, 0, 0.12);
+  --shadow-panel: 0 12px 40px rgba(0, 0, 0, 0.24), 0 0 0 0.5px rgba(0, 0, 0, 0.08);
+
+  /* Corner radii — HIG standard control shapes */
+  --r-control: 6px;
+  --r-field: 6px;
+  --r-panel: 12px;
+  --r-pill: 999px;
+
+  /* 8pt grid */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 20px;
+  --s6: 24px;
+
+  color-scheme: light dark;
+  accent-color: var(--accent);
 }
 
-* { box-sizing: border-box; }
+@media (prefers-color-scheme: dark) {
+  :root {
+    --window-bg: #1e1e1e;
+    --sidebar-bg: rgba(40, 40, 40, 0.68);
+    --content-bg: #1e1e1e;
+    --control-bg: #3a3a3c;
+    --control-bg-hover: #464648;
+    --control-border: rgba(255, 255, 255, 0.14);
+    --field-bg: rgba(255, 255, 255, 0.06);
+
+    --label: rgba(255, 255, 255, 0.92);
+    --label-secondary: rgba(255, 255, 255, 0.55);
+    --label-tertiary: rgba(255, 255, 255, 0.25);
+    --separator: rgba(255, 255, 255, 0.1);
+    --fill-quaternary: rgba(255, 255, 255, 0.05);
+
+    --accent: #0a84ff;
+    --accent-hover: #3d9bff;
+    --red: #ff453a;
+    --green: #30d158;
+    --orange: #ff9f0a;
+
+    --focus-ring: rgba(10, 132, 255, 0.55);
+    --shadow-control: 0 0.5px 1px rgba(0, 0, 0, 0.4);
+    --shadow-panel: 0 16px 48px rgba(0, 0, 0, 0.6), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+  }
+}
+
+/* ------------------------------------------------------------------ base */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
 
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--text);
-  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  background: var(--window-bg);
+  color: var(--label);
+  /* -apple-system resolves to SF Pro on macOS. */
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
+    system-ui, sans-serif;
+  font-size: 13px; /* HIG body */
+  line-height: 1.38;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  /* Chrome should not feel like a web page. */
   user-select: none;
+  cursor: default;
 }
+
+/* The macOS type scale. */
+.t-large-title { font-size: 26px; font-weight: 700; letter-spacing: 0.01em; }
+.t-title-1 { font-size: 22px; font-weight: 700; letter-spacing: 0.01em; }
+.t-title-2 { font-size: 17px; font-weight: 600; }
+.t-title-3 { font-size: 15px; font-weight: 600; }
+.t-headline { font-size: 13px; font-weight: 600; }
+.t-body { font-size: 13px; font-weight: 400; }
+.t-callout { font-size: 12px; font-weight: 400; }
+.t-subheadline { font-size: 11px; font-weight: 400; }
+.t-footnote { font-size: 10px; font-weight: 400; }
+
+.secondary { color: var(--label-secondary); }
+.tertiary { color: var(--label-tertiary); }
+.mono {
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.selectable { user-select: text; cursor: text; }
+
+/* --------------------------------------------------------------- controls */
 
 button {
   font: inherit;
-  color: var(--text);
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 7px 12px;
-  cursor: pointer;
+  font-size: 13px;
+  color: var(--label);
+  background: var(--control-bg);
+  border: 0.5px solid var(--control-border);
+  border-radius: var(--r-control);
+  box-shadow: var(--shadow-control);
+  padding: 4px 12px;
+  min-height: 24px;
+  cursor: default;
+  transition: background 120ms ease;
 }
-button:hover:not(:disabled) { border-color: var(--accent); }
-button:disabled { opacity: 0.45; cursor: default; }
-button.primary { background: var(--accent); color: #0b1020; border-color: var(--accent); font-weight: 600; }
-button.danger { color: var(--danger); }
-button.ghost { background: transparent; }
+button:hover:not(:disabled) { background: var(--control-bg-hover); }
+button:active:not(:disabled) { background: var(--fill-quaternary); }
+button:disabled { opacity: 0.35; }
+button:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 1px; }
 
-input, textarea, select {
+/* Default button — the one Return triggers. */
+button.primary {
+  background: var(--accent);
+  color: var(--accent-label);
+  border-color: transparent;
+  font-weight: 500;
+}
+button.primary:hover:not(:disabled) { background: var(--accent-hover); }
+button.primary:active:not(:disabled) { filter: brightness(0.92); }
+
+button.plain {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--accent);
+}
+button.plain:hover:not(:disabled) { background: var(--fill-quaternary); }
+
+button.destructive { color: var(--red); }
+
+input,
+textarea,
+select {
   font: inherit;
+  font-size: 13px;
   width: 100%;
-  color: var(--text);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 8px 10px;
+  color: var(--label);
+  background: var(--field-bg);
+  border: 0.5px solid var(--control-border);
+  border-radius: var(--r-field);
+  padding: 5px 8px;
+  min-height: 24px;
   user-select: text;
+  cursor: text;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
 }
-input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); }
-textarea { resize: vertical; min-height: 64px; }
-label { display: block; margin-bottom: 4px; color: var(--muted); font-size: 12px; }
-.field { margin-bottom: 12px; }
+input::placeholder, textarea::placeholder { color: var(--label-tertiary); }
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+select { cursor: default; }
+textarea { resize: vertical; min-height: 60px; line-height: 1.45; }
 
-.error {
-  background: rgba(248, 113, 113, 0.1);
-  border: 1px solid rgba(248, 113, 113, 0.35);
-  color: #fca5a5;
-  padding: 8px 10px;
-  border-radius: var(--radius);
-  margin-bottom: 12px;
-  font-size: 13px;
+label {
+  display: block;
+  margin-bottom: var(--s1);
+  font-size: 11px;
+  color: var(--label-secondary);
 }
-.notice {
-  background: rgba(74, 222, 128, 0.08);
-  border: 1px solid rgba(74, 222, 128, 0.3);
-  color: #86efac;
-  padding: 8px 10px;
-  border-radius: var(--radius);
-  margin-bottom: 12px;
-  font-size: 13px;
+
+/* macOS switch, for on/off settings. */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 38px;
+  height: 22px;
+  flex: none;
 }
-.muted { color: var(--muted); }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.switch input {
+  position: absolute;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: default;
+}
+.switch .track {
+  position: absolute;
+  inset: 0;
+  background: var(--label-tertiary);
+  border-radius: var(--r-pill);
+  transition: background 180ms ease;
+  pointer-events: none;
+}
+.switch .thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+}
+.switch input:checked ~ .track { background: var(--green); }
+.switch input:checked ~ .thumb { transform: translateX(16px); }
+.switch input:disabled ~ .track { opacity: 0.4; }
+.switch input:focus-visible ~ .track { box-shadow: 0 0 0 3px var(--focus-ring); }
+
+/* ---------------------------------------------------------------- layout */
+
+.field { margin-bottom: var(--s3); }
+
+/* Grouped settings box — the standard macOS inset list. */
+.group {
+  background: var(--content-bg);
+  border: 0.5px solid var(--control-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.group-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: 10px var(--s3);
+  border-bottom: 0.5px solid var(--separator);
+}
+.group-row:last-child { border-bottom: none; }
+.group-row .grow { flex: 1; min-width: 0; }
+
+/* --------------------------------------------------------------- banners */
+
+.banner {
+  display: flex;
+  gap: var(--s2);
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-radius: var(--r-control);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.banner.error { background: color-mix(in srgb, var(--red) 12%, transparent); color: var(--red); }
+.banner.ok { background: color-mix(in srgb, var(--green) 12%, transparent); color: var(--green); }
+.banner.warn { background: color-mix(in srgb, var(--orange) 14%, transparent); color: var(--orange); }
+.banner.info { background: var(--fill-quaternary); color: var(--label-secondary); }
+
+/* Scrollbars: overlay style, like the system. */
+::-webkit-scrollbar { width: 14px; height: 14px; }
+::-webkit-scrollbar-thumb {
+  background: var(--label-tertiary);
+  border-radius: var(--r-pill);
+  border: 4px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background-clip: content-box; background-color: var(--label-secondary); }
+::-webkit-scrollbar-track { background: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}

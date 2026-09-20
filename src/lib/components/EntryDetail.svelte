@@ -1,6 +1,7 @@
 <script lang="ts">
   import { copySecret, deleteEntry, revealSecret } from '$lib/api';
   import { errorMessage, type EntryMeta, type RevealedSecret } from '$lib/types';
+  import KindIcon from './KindIcon.svelte';
 
   let {
     entry,
@@ -9,11 +10,8 @@
   }: { entry: EntryMeta; onEdit: () => void; onDeleted: () => void } = $props();
 
   /**
-   * Plaintext, held only while it is on screen.
-   *
-   * Never written to a store, localStorage, or the console. Cleared whenever the
-   * selected entry changes — see the $effect below — so switching entries cannot
-   * leave a previous secret hanging around in memory.
+   * Plaintext, held only while on screen. Never stored, never logged, cleared
+   * whenever the selection changes.
    */
   let revealed = $state<RevealedSecret | null>(null);
   let busy = $state('');
@@ -21,7 +19,6 @@
   let copied = $state(false);
 
   $effect(() => {
-    // Depend on the id so this re-runs on selection change.
     void entry.id;
     revealed = null;
     error = '';
@@ -40,20 +37,15 @@
     }
   }
 
-  function hide() {
-    revealed = null;
-  }
-
   async function doCopy() {
     error = '';
     busy = 'copy';
     copied = false;
     try {
-      // The plaintext goes straight to the clipboard from Rust; nothing
-      // sensitive comes back across the IPC boundary here.
+      // Written to the clipboard in Rust; no plaintext returns here.
       await copySecret(entry.id);
       copied = true;
-      setTimeout(() => (copied = false), 2000);
+      setTimeout(() => (copied = false), 2200);
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -62,7 +54,7 @@
   }
 
   async function doDelete() {
-    if (!confirm(`Delete "${entry.label}"? This cannot be undone.`)) return;
+    if (!confirm(`Delete “${entry.label}”?\n\nThis cannot be undone.`)) return;
     error = '';
     busy = 'delete';
     try {
@@ -77,79 +69,102 @@
   }
 
   const fmt = (ts: number | null) =>
-    ts === null ? 'never' : new Date(ts * 1000).toLocaleString();
+    ts === null
+      ? 'Never'
+      : new Date(ts * 1000).toLocaleString(undefined, {
+          dateStyle: 'medium',
+          timeStyle: 'short'
+        });
 </script>
 
 <div class="detail">
   <header>
-    <div>
-      <h2>{entry.label}</h2>
+    <span class="icon"><KindIcon kind={entry.kind} size={19} /></span>
+    <div class="grow">
+      <h2 class="t-title-2">{entry.label}</h2>
       <div class="tags">
-        <span class="kind">{entry.kind}</span>
+        <span class="tag kind">{entry.kind}</span>
         {#each entry.tags as t (t)}<span class="tag">{t}</span>{/each}
       </div>
     </div>
-    <button class="ghost" onclick={onEdit}>Edit</button>
+    <button onclick={onEdit}>Edit</button>
   </header>
 
-  {#if error}<div class="error">{error}</div>{/if}
-  {#if copied}<div class="notice">Copied to the clipboard.</div>{/if}
+  {#if error}<div class="banner error">{error}</div>{/if}
+  {#if copied}<div class="banner ok">Copied — clears from the clipboard shortly.</div>{/if}
 
-  <div class="secret-box">
-    {#if revealed}
-      <div class="value mono">{revealed.secret}</div>
-      {#if revealed.note}
-        <div class="note-label">Note</div>
-        <div class="value mono note">{revealed.note}</div>
-      {/if}
-    {:else}
-      <div class="value hidden mono">••••••••••••••••</div>
-    {/if}
-  </div>
-
-  <div class="actions">
-    {#if revealed}
-      <button onclick={hide}>Hide</button>
-    {:else}
-      <button onclick={doReveal} disabled={busy !== ''}>
-        {busy === 'reveal' ? 'Decrypting…' : 'Reveal'}
+  <div class="group">
+    <div class="group-row secret">
+      <div class="grow">
+        <div class="t-subheadline secondary">Secret</div>
+        {#if revealed}
+          <div class="mono value selectable">{revealed.secret}</div>
+        {:else}
+          <div class="mono value masked">••••••••••••••••</div>
+        {/if}
+      </div>
+      <button class="plain" onclick={revealed ? () => (revealed = null) : doReveal}
+        disabled={busy !== ''}>
+        {revealed ? 'Hide' : busy === 'reveal' ? 'Decrypting…' : 'Show'}
       </button>
+      <button class="primary" onclick={doCopy} disabled={busy !== ''}>
+        {busy === 'copy' ? 'Copying…' : 'Copy'}
+      </button>
+    </div>
+
+    {#if revealed?.note}
+      <div class="group-row">
+        <div class="grow">
+          <div class="t-subheadline secondary">Note</div>
+          <div class="mono value note selectable">{revealed.note}</div>
+        </div>
+      </div>
     {/if}
-    <button class="primary" onclick={doCopy} disabled={busy !== ''}>
-      {busy === 'copy' ? 'Copying…' : 'Copy secret'}
-    </button>
-    <span class="spacer"></span>
-    <button class="danger ghost" onclick={doDelete} disabled={busy !== ''}>Delete</button>
   </div>
 
-  <dl class="meta">
-    <div><dt>Created</dt><dd>{fmt(entry.createdAt)}</dd></div>
-    <div><dt>Updated</dt><dd>{fmt(entry.updatedAt)}</dd></div>
-    <div><dt>Last used</dt><dd>{fmt(entry.lastUsedAt)}</dd></div>
-    <div><dt>ID</dt><dd class="mono id">{entry.id}</dd></div>
-  </dl>
+  <div class="group">
+    <div class="group-row"><span class="grow t-body">Created</span>
+      <span class="t-callout secondary">{fmt(entry.createdAt)}</span></div>
+    <div class="group-row"><span class="grow t-body">Modified</span>
+      <span class="t-callout secondary">{fmt(entry.updatedAt)}</span></div>
+    <div class="group-row"><span class="grow t-body">Last used</span>
+      <span class="t-callout secondary">{fmt(entry.lastUsedAt)}</span></div>
+    <div class="group-row"><span class="grow t-body">Identifier</span>
+      <span class="mono t-footnote tertiary selectable">{entry.id}</span></div>
+  </div>
+
+  <div class="foot">
+    <button class="destructive" onclick={doDelete} disabled={busy !== ''}>Delete Entry</button>
+  </div>
 </div>
 
 <style>
-  .detail { display: flex; flex-direction: column; gap: 14px; }
-  header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-  h2 { margin: 0 0 6px; font-size: 17px; font-weight: 600; word-break: break-word; }
-  .tags { display: flex; flex-wrap: wrap; gap: 6px; }
-  .kind, .tag {
-    font-size: 11px; padding: 2px 7px; border-radius: 999px;
-    border: 1px solid var(--border); color: var(--muted);
+  .detail { display: flex; flex-direction: column; gap: var(--s4); max-width: 560px; }
+  header { display: flex; align-items: flex-start; gap: var(--s3); }
+  .icon {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
   }
-  .kind { color: var(--accent); border-color: rgba(96, 165, 250, 0.4); }
-  .secret-box { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; }
-  .value { font-size: 13px; word-break: break-all; white-space: pre-wrap; user-select: text; }
-  .value.hidden { color: var(--muted); letter-spacing: 2px; user-select: none; }
-  .note-label { margin: 10px 0 4px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
-  .note { color: var(--muted); }
-  .actions { display: flex; gap: 8px; align-items: center; }
-  .spacer { flex: 1; }
-  .meta { display: grid; gap: 6px; margin: 0; font-size: 12px; }
-  .meta > div { display: grid; grid-template-columns: 90px 1fr; }
-  dt { color: var(--muted); }
-  dd { margin: 0; }
-  .id { font-size: 11px; word-break: break-all; user-select: text; }
+  .grow { flex: 1; min-width: 0; }
+  h2 { margin: 0 0 3px; word-break: break-word; }
+  .tags { display: flex; flex-wrap: wrap; gap: var(--s1); }
+  .tag {
+    font-size: 10px;
+    padding: 1px 7px;
+    border-radius: var(--r-pill);
+    background: var(--fill-quaternary);
+    color: var(--label-secondary);
+  }
+  .tag.kind { color: var(--accent); }
+  .secret { align-items: center; }
+  .value { margin-top: 2px; word-break: break-all; white-space: pre-wrap; }
+  .masked { color: var(--label-tertiary); letter-spacing: 2px; }
+  .note { color: var(--label-secondary); }
+  .foot { display: flex; }
 </style>

@@ -8,6 +8,8 @@
  */
 import { invoke } from '@tauri-apps/api/core';
 import type {
+  BiometricState,
+  BiometricUnlockOutcome,
   CaptureState,
   EntryMeta,
   NewEntryInput,
@@ -105,3 +107,27 @@ export const setShortcut = (accelerator: string) =>
 
 export const setClipboardClearSeconds = (seconds: number) =>
   invoke<Settings>('set_clipboard_clear_seconds', { seconds });
+
+// ------------------------------------------------------------ Phase 3
+
+export const biometricState = () => invoke<BiometricState>('biometric_state');
+
+/**
+ * Turn on biometric unlock.
+ *
+ * Takes the master password even though the vault is open: adding a second way
+ * in should cost the credential it sits alongside.
+ */
+export const enableBiometrics = (password: string) =>
+  invoke<BiometricState>('enable_biometrics', { password });
+
+export const disableBiometrics = () => invoke<BiometricState>('disable_biometrics');
+
+/**
+ * Unlock with Touch ID. Raises the system prompt.
+ *
+ * Every failure rejects — there is no silent unlock. Callers show the password
+ * field on any error.
+ */
+export const unlockWithBiometrics = () =>
+  invoke<BiometricUnlockOutcome>('unlock_with_biometrics');

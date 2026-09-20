@@ -90,6 +90,11 @@ pub fn run() {
             commands::get_settings,
             commands::set_shortcut,
             commands::set_clipboard_clear_seconds,
+            // Phase 3 — biometrics
+            commands::biometric_state,
+            commands::enable_biometrics,
+            commands::disable_biometrics,
+            commands::unlock_with_biometrics,
         ])
         .setup(|app| {
             let handle = app.handle();

@@ -135,6 +135,16 @@ impl Vault {
         Ok(())
     }
 
+    /// Prove knowledge of the master password without altering the session.
+    ///
+    /// Used before granting a second unlock path: enabling biometrics should
+    /// require the credential it is being added alongside, not merely an
+    /// already-unlocked window someone walked up to.
+    pub fn verify_password(&self, password: &[u8]) -> Result<()> {
+        // The derived key is dropped immediately; this is a check, not an unlock.
+        self.header.unlock_with_password(password).map(|_| ())
+    }
+
     /// Drop the vault key. Called on explicit lock, idle timeout, sleep and quit.
     ///
     /// `VaultKey` holds a `SecretBox`, so the bytes are zeroized as it drops.
@@ -402,6 +412,60 @@ impl Vault {
         // Keep the session usable: the key itself is unchanged.
         self.key = Some(vault_key);
         Ok(())
+    }
+
+    /// Add a keystore-backed unlock slot wrapping the current vault key.
+    ///
+    /// Requires an unlocked vault: we can only wrap a key we hold. `kek` is
+    /// the 32 bytes the OS keystore will guard behind Touch ID or Hello — the
+    /// caller generates it, stores it, and passes it here.
+    pub fn enable_keystore_unlock(
+        &mut self,
+        kind: SlotKind,
+        kek: &[u8; crypto::KEY_LEN],
+    ) -> Result<()> {
+        let vault_key = self.key()?;
+        let slot = self
+            .header
+            .build_keystore_slot(vault_key, kek, kind, now())?;
+
+        let mut next = self.header.clone();
+        next.set_slot(slot);
+        db::set_meta(&self.conn, db::META_HEADER, &next.encode()?)?;
+        self.header = next;
+        Ok(())
+    }
+
+    /// Unlock using a key read back from the OS keystore.
+    ///
+    /// The biometric prompt happened before this call — it is what let the
+    /// caller read `kek`. A failure leaves the vault locked so the UI falls
+    /// back to the master password; there is no silent unlock path
+    /// (SECURITY.md, "Rules for both platforms").
+    pub fn unlock_with_keystore_key(
+        &mut self,
+        kek: &[u8; crypto::KEY_LEN],
+        kind: SlotKind,
+    ) -> Result<()> {
+        let key = self.header.unlock_with_keystore_key(kek, kind)?;
+        self.key = Some(key);
+        Ok(())
+    }
+
+    /// Remove a keystore-backed slot. The master password is unaffected.
+    ///
+    /// Works whether or not the vault is unlocked: turning biometrics off
+    /// should not require proving you can turn it on.
+    pub fn disable_keystore_unlock(&mut self, kind: SlotKind) -> Result<()> {
+        let mut next = self.header.clone();
+        next.remove_slots(kind)?;
+        db::set_meta(&self.conn, db::META_HEADER, &next.encode()?)?;
+        self.header = next;
+        Ok(())
+    }
+
+    pub fn has_slot(&self, kind: SlotKind) -> bool {
+        self.header.has_slot(kind)
     }
 
     // -------------------------------------------------------------- snapshots
