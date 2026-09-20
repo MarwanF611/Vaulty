@@ -1,0 +1,25 @@
+target/
+node_modules/
+dist/
+.DS_Store
+*.db
+*.db-journal
+*.vault
+.env
+.env.*
+src-tauri/target/
+
+# SvelteKit / Vite
+.svelte-kit/
+build/
+
+# Tauri generated schemas and bundles
+src-tauri/gen/
+src-tauri/target/
+
+# Vault snapshots and backups, in case one is ever created in-tree
+*.snap1
+*.snap2
+*.snap3
+*.prerestore
+*.vaultybak
