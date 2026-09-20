@@ -1,0 +1,50 @@
+[workspace]
+resolver = "2"
+members = ["crates/vault-core"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/marwanfikri/vaulty"
+
+[workspace.dependencies]
+# Crypto. Audited crates, standard constructions only (CLAUDE.md rule 2).
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+zeroize = { version = "1.8", features = ["derive"] }
+secrecy = "0.10"
+subtle = "2.6"
+rand_core = { version = "0.6", features = ["getrandom"] }
+
+# Storage
+rusqlite = { version = "0.32", features = ["bundled", "blob"] }
+uuid = { version = "1.11", features = ["v7", "serde"] }
+
+# Errors / serialisation
+thiserror = "2.0"
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[profile.release]
+# Keep panics from unwinding through FFI later, and strip symbols that could
+# leak layout information. Debug assertions stay off in release.
+panic = "abort"
+strip = "symbols"
+
+# Argon2 is deliberately expensive. In an unoptimised debug build it is slow
+# enough to make `cargo test` unusable, so the crypto dependencies are compiled
+# with optimisations even in dev and test. Our own crates stay unoptimised so
+# debugging and backtraces still work.
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3
+[profile.dev.package.chacha20]
+opt-level = 3
+[profile.dev.package.chacha20poly1305]
+opt-level = 3
+[profile.dev.package.poly1305]
+opt-level = 3
