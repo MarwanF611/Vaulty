@@ -94,16 +94,27 @@ authenticated as associated data, and the storage decisions behind them.
 
 ## Pre-release checklist
 
-- [ ] No secret appears in any log, error, panic message or crash dump
-- [ ] `strings` on the binary reveals no embedded key material
+- [x] No secret appears in any log, error, panic message or crash dump
+      *(enforced by `src-tauri/tests/no_secret_logging.rs`, which walks the tree
+      every build, and by the error/Debug tests in
+      `crates/vault-core/tests/security_checklist.rs`)*
+- [x] `strings` on the binary reveals no embedded key material
+      *(`./scripts/security-audit.sh`, run against the release binary)*
 - [ ] Memory dump after lock contains no plaintext secrets
+      *(not attempted, and may not pass as written: a `String` that reallocated
+      while growing leaves its old buffer unzeroed, and SQLite's buffers are not
+      ours. Needs a custom allocator, not more `Zeroizing`. See
+      `docs/PHASE5-NOTES.md`.)*
 - [x] Corrupting any byte of the vault file causes a clean authentication failure, never a
       silent wrong-plaintext read
       *(covered for the header and for entry ciphertext by `corrupting_any_header_byte_fails_cleanly`
       and `flipping_any_single_bit_of_ciphertext_fails_cleanly`; re-verify once the UI can
       surface the failure)*
-- [ ] Wrong master password is indistinguishable in timing from a corrupt file
-      *(holds for a corrupt wrapped key — both run the KDF then fail. A structurally
-      malformed header still fails before the KDF runs: see PHASE0-NOTES.md)*
+- [x] Wrong master password is indistinguishable in timing from a corrupt file
+      *(closed in Phase 5. `Vault::open_and_unlock` runs one KDF at production
+      cost either way; the gap was 524x before the fix. Guarded by
+      `a_corrupt_file_and_a_wrong_password_take_comparable_time`.)*
 - [ ] Restore from snapshot tested on both platforms
+      *(macOS covered by `src-tauri/tests/recovery.rs`, which corrupts a live
+      vault and restores it. Windows awaits Phase 4.)*
 - [ ] At least one security-minded person outside the project has read the crypto code

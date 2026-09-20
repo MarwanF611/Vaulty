@@ -37,6 +37,14 @@ pub const DEFAULT_PASSWORD_REPROMPT_DAYS: u64 = 14;
 const MIN_PASSWORD_REPROMPT_DAYS: u64 = 1;
 const MAX_PASSWORD_REPROMPT_DAYS: u64 = 90;
 
+/// Idle seconds before the vault locks itself. Five minutes.
+pub const DEFAULT_IDLE_LOCK_SECONDS: u64 = 300;
+
+/// Zero disables the idle timer. Sleep and screen lock still lock the vault —
+/// SECURITY.md makes those non-negotiable, so they are not settings.
+const MIN_IDLE_LOCK_SECONDS: u64 = 30;
+const MAX_IDLE_LOCK_SECONDS: u64 = 4 * 60 * 60;
+
 /// Refuse absurd values from a hand-edited file, in both directions.
 const MIN_CLIPBOARD_CLEAR_SECONDS: u64 = 5;
 const MAX_CLIPBOARD_CLEAR_SECONDS: u64 = 600;
@@ -61,6 +69,9 @@ pub struct Settings {
     /// How often the master password must be entered even when biometrics is on.
     #[serde(default = "default_reprompt_days")]
     pub password_reprompt_days: u64,
+    /// Idle seconds before auto-lock. 0 disables the idle timer only.
+    #[serde(default = "default_idle_lock_seconds")]
+    pub idle_lock_seconds: u64,
     /// Unix seconds of the last unlock that used the master password.
     ///
     /// Not secret, and not security-relevant: the worst an attacker who edits
@@ -75,12 +86,17 @@ fn default_reprompt_days() -> u64 {
     DEFAULT_PASSWORD_REPROMPT_DAYS
 }
 
+fn default_idle_lock_seconds() -> u64 {
+    DEFAULT_IDLE_LOCK_SECONDS
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
             shortcut: DEFAULT_SHORTCUT.to_string(),
             clipboard_clear_seconds: DEFAULT_CLIPBOARD_CLEAR_SECONDS,
             password_reprompt_days: DEFAULT_PASSWORD_REPROMPT_DAYS,
+            idle_lock_seconds: DEFAULT_IDLE_LOCK_SECONDS,
             last_password_unlock_at: None,
         }
     }
@@ -101,6 +117,13 @@ impl Settings {
         self.password_reprompt_days = self
             .password_reprompt_days
             .clamp(MIN_PASSWORD_REPROMPT_DAYS, MAX_PASSWORD_REPROMPT_DAYS);
+        // Zero is meaningful — it turns the idle timer off — so it is preserved
+        // rather than clamped up to the minimum.
+        if self.idle_lock_seconds != 0 {
+            self.idle_lock_seconds = self
+                .idle_lock_seconds
+                .clamp(MIN_IDLE_LOCK_SECONDS, MAX_IDLE_LOCK_SECONDS);
+        }
         self
     }
 
@@ -172,6 +195,39 @@ mod tests {
     }
 
     const DAY: i64 = 86_400;
+
+    #[test]
+    fn the_idle_lock_default_is_five_minutes() {
+        assert_eq!(Settings::default().idle_lock_seconds, 300);
+    }
+
+    #[test]
+    fn zero_idle_seconds_survives_sanitising() {
+        // It means "no idle timer", not "an invalid value to be clamped".
+        let s = Settings {
+            idle_lock_seconds: 0,
+            ..Settings::default()
+        }
+        .sanitised();
+        assert_eq!(s.idle_lock_seconds, 0);
+    }
+
+    #[test]
+    fn an_absurd_idle_window_is_clamped() {
+        let s = Settings {
+            idle_lock_seconds: 1,
+            ..Settings::default()
+        }
+        .sanitised();
+        assert_eq!(s.idle_lock_seconds, MIN_IDLE_LOCK_SECONDS);
+
+        let s = Settings {
+            idle_lock_seconds: u64::MAX,
+            ..Settings::default()
+        }
+        .sanitised();
+        assert_eq!(s.idle_lock_seconds, MAX_IDLE_LOCK_SECONDS);
+    }
 
     #[test]
     fn a_vault_never_unlocked_by_password_is_due_immediately() {

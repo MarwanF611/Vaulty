@@ -5,9 +5,18 @@
     permissionState,
     requestAccessibility,
     setClipboardClearSeconds,
-    setShortcut
+    setIdleLockSeconds,
+    setShortcut,
+    snapshotNow,
+    listSnapshots
   } from '$lib/api';
-  import { errorMessage, isCmdError, type PermissionState, type Settings } from '$lib/types';
+  import {
+    errorMessage,
+    isCmdError,
+    type PermissionState,
+    type Settings,
+    type SnapshotInfo
+  } from '$lib/types';
   import BiometricsSetting from './BiometricsSetting.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
@@ -18,16 +27,40 @@
   let error = $state('');
   let notice = $state('');
   let busy = $state(false);
+  let snapshots = $state<SnapshotInfo[]>([]);
 
   $effect(() => {
     void load();
   });
+
+  async function saveIdle(seconds: number) {
+    error = '';
+    notice = '';
+    try {
+      settings = await setIdleLockSeconds(seconds);
+      notice = 'Auto-lock updated.';
+    } catch (e) {
+      error = errorMessage(e);
+    }
+  }
+
+  async function takeSnapshot() {
+    error = '';
+    notice = '';
+    try {
+      snapshots = await snapshotNow();
+      notice = 'Snapshot taken.';
+    } catch (e) {
+      error = errorMessage(e);
+    }
+  }
 
   async function load() {
     try {
       settings = await getSettings();
       shortcutDraft = settings.shortcut;
       perms = await permissionState();
+      snapshots = await listSnapshots();
     } catch (e) {
       error = errorMessage(e);
     }
@@ -120,7 +153,67 @@
       </div>
     </section>
 
+    <section>
+      <h3 class="t-headline">Auto-lock</h3>
+      <div class="group">
+        <div class="group-row">
+          <div class="grow">
+            <div class="t-body">Lock after inactivity</div>
+            <div class="t-subheadline secondary">
+              Measured across the whole Mac, not just Vaulty.
+            </div>
+          </div>
+          <select class="narrow" value={settings.idleLockSeconds}
+            onchange={(e) => saveIdle(Number(e.currentTarget.value))}>
+            <option value={60}>1 minute</option>
+            <option value={300}>5 minutes</option>
+            <option value={900}>15 minutes</option>
+            <option value={1800}>30 minutes</option>
+            <option value={3600}>1 hour</option>
+            <option value={0}>Never</option>
+          </select>
+        </div>
+        <div class="group-row">
+          <div class="grow">
+            <div class="t-body">Lock on sleep and screen lock</div>
+            <div class="t-subheadline secondary">
+              Always on. Closing the lid or locking the screen drops the key.
+            </div>
+          </div>
+          <span class="t-callout secondary">Always</span>
+        </div>
+      </div>
+    </section>
+
     <BiometricsSetting />
+
+    <section>
+      <h3 class="t-headline">Snapshots</h3>
+      <div class="group">
+        <div class="group-row">
+          <div class="grow">
+            <div class="t-body">Local snapshots</div>
+            <div class="t-subheadline secondary">
+              {#if snapshots.length === 0}
+                None yet. Vaulty keeps the last three.
+              {:else}
+                {snapshots.length} kept, newest
+                {snapshots[0].modifiedAt
+                  ? new Date(snapshots[0].modifiedAt * 1000).toLocaleString(undefined, {
+                      dateStyle: 'medium',
+                      timeStyle: 'short'
+                    })
+                  : 'unknown'}.
+              {/if}
+            </div>
+          </div>
+          <button onclick={takeSnapshot}>Snapshot Now</button>
+        </div>
+      </div>
+      <p class="t-footnote tertiary">
+        If the vault file is ever unreadable, Vaulty offers to restore one of these at launch.
+      </p>
+    </section>
 
     <section>
       <h3 class="t-headline">Accessibility</h3>

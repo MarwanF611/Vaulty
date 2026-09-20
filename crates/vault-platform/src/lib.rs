@@ -30,10 +30,13 @@
 
 mod biometrics;
 mod error;
+mod idle;
 mod permissions;
 
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "macos")]
+mod macos_idle;
 #[cfg(target_os = "macos")]
 mod macos_keychain;
 #[cfg(target_os = "windows")]
@@ -45,6 +48,7 @@ pub use biometrics::{
     UnsupportedProvider,
 };
 pub use error::{PlatformError, Result};
+pub use idle::{screen_is_locked, system_idle_seconds, SleepDetector};
 pub use permissions::{
     accessibility_status, open_accessibility_settings, prompt_for_accessibility, PermissionStatus,
 };

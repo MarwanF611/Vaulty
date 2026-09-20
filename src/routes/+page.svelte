@@ -1,8 +1,18 @@
 <script lang="ts">
   import '$lib/styles.css';
+  import { listen } from '@tauri-apps/api/event';
   import { listEntries, lockVault, searchEntries, vaultStatus } from '$lib/api';
-  import { errorMessage, isCmdError, type EntryMeta, type VaultStatus } from '$lib/types';
+  import {
+    errorMessage,
+    isCmdError,
+    LOCK_EVENT,
+    type EntryMeta,
+    type LockedPayload,
+    type VaultStatus
+  } from '$lib/types';
   import Unlock from '$lib/components/Unlock.svelte';
+  import Onboarding from '$lib/components/Onboarding.svelte';
+  import Recovery from '$lib/components/Recovery.svelte';
   import EntryForm from '$lib/components/EntryForm.svelte';
   import EntryDetail from '$lib/components/EntryDetail.svelte';
   import Settings from '$lib/components/Settings.svelte';
@@ -15,6 +25,20 @@
   let mode = $state<'view' | 'add' | 'edit' | 'settings'>('view');
   let error = $state('');
   let loading = $state(true);
+  /** Why the vault locked itself, shown once on the unlock screen. */
+  let lockNotice = $state('');
+
+  // The vault can lock itself at any moment — idle, sleep, screen lock. When it
+  // does, clear everything on screen before showing why.
+  listen<LockedPayload>(LOCK_EVENT, (e) => {
+    entries = [];
+    selectedId = null;
+    query = '';
+    mode = 'view';
+    error = '';
+    lockNotice = e.payload.message;
+    void refreshStatus();
+  });
 
   const selected = $derived(entries.find((e) => e.id === selectedId) ?? null);
   const unlocked = $derived(status !== null && !status.locked);
@@ -73,6 +97,7 @@
   function onUnlocked(next: VaultStatus) {
     status = next;
     error = '';
+    lockNotice = '';
     void refreshEntries();
   }
 
@@ -88,8 +113,14 @@
 
 {#if loading}
   <div class="center secondary t-callout">Loading…</div>
+{:else if status && status.exists && !status.readable}
+  <!-- The file is there but unopenable. A password field would be a dead end;
+       offer snapshot recovery instead. -->
+  <Recovery {status} onRestored={(s) => { status = s; lockNotice = ''; }} />
+{:else if status && !status.exists}
+  <Onboarding {status} onCreated={onUnlocked} />
 {:else if !unlocked && status}
-  <Unlock {status} {onUnlocked} />
+  <Unlock {status} {onUnlocked} {lockNotice} />
 {:else if status}
   <div class="app">
     <!-- Sidebar: translucent, like Finder and Mail. The top padding clears the

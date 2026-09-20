@@ -4,6 +4,7 @@
 //! everything that touches the OS lives in `vault-platform`. This crate owns
 //! the windows, the app state, and the IPC boundary.
 
+mod autolock;
 mod capture;
 
 /// The capture sequence's wait budget, exposed for the timing test in
@@ -90,6 +91,11 @@ pub fn run() {
             commands::get_settings,
             commands::set_shortcut,
             commands::set_clipboard_clear_seconds,
+            commands::set_idle_lock_seconds,
+            commands::lock_reason_message,
+            commands::list_snapshots,
+            commands::restore_snapshot,
+            commands::snapshot_now,
             // Phase 3 — biometrics
             commands::biometric_state,
             commands::enable_biometrics,
@@ -112,6 +118,10 @@ pub fn run() {
             if let Err(e) = shortcut::register(handle, &configured) {
                 eprintln!("vaulty: {}", e.message(&configured));
             }
+
+            // Auto-lock runs for the life of the app (SECURITY.md: lock on
+            // sleep and screen lock, not only on an idle timer).
+            autolock::spawn(handle.clone());
             Ok(())
         })
         .on_window_event(|window, event| {

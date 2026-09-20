@@ -115,13 +115,19 @@ fallback behaviour as macOS.
 
 ## Phase 5 — Hardening (1–2 weeks)
 
-- [ ] Auto-lock: idle timeout (configurable), system sleep, screen lock
-- [ ] Zeroize audit — every path that touches plaintext
-- [ ] Secret-in-logs audit across the whole repo
-- [ ] Crash recovery from snapshot, tested by corrupting a live vault
-- [ ] Settings: shortcut, idle timeout, clipboard clear delay, biometrics toggle
-- [ ] First-run onboarding that states plainly there is no password recovery
-- [ ] The full checklist at the end of `docs/SECURITY.md`
+- [x] Auto-lock: idle timeout (configurable), system sleep, screen lock
+- [x] Zeroize audit — every path that touches plaintext
+- [x] Secret-in-logs audit across the whole repo
+- [x] Crash recovery from snapshot, tested by corrupting a live vault
+- [x] Settings: shortcut, idle timeout, clipboard clear delay, biometrics toggle
+- [x] First-run onboarding that states plainly there is no password recovery
+- [x] The full checklist at the end of `docs/SECURITY.md`
+
+**Status: all seven items built; the exit criterion is not yet met.**
+Four of the seven SECURITY.md checklist boxes are ticked. The three that are not:
+a memory dump after lock (not attempted, and may not pass — see PHASE5-NOTES.md),
+snapshot restore on Windows (awaits Phase 4), and an outside review of the crypto
+code. 222 tests, clippy clean.
 
 **Exit criteria:** every box in the SECURITY.md pre-release checklist is ticked.
 

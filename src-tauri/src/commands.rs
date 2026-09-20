@@ -33,6 +33,12 @@ use crate::{capture, popup, shortcut};
 pub struct VaultStatus {
     /// Whether a vault file exists at the configured path.
     pub exists: bool,
+    /// Whether that file can be opened at all.
+    ///
+    /// False means the header is unreadable — a truncated write, a bad sector,
+    /// a half-restored backup. The interface offers snapshot recovery rather
+    /// than a password field that can never work.
+    pub readable: bool,
     pub locked: bool,
     pub path: String,
     /// Only populated while unlocked.
@@ -146,8 +152,11 @@ pub fn vault_status(state: State<'_, AppState>) -> CmdResult<VaultStatus> {
     let path = state.path().display().to_string();
 
     if locked {
+        // Only probed while locked: once open, readability is self-evident.
+        let readable = !exists || Vault::open(state.path()).is_ok();
         return Ok(VaultStatus {
             exists,
+            readable,
             locked,
             path,
             vault_id: None,
@@ -159,6 +168,7 @@ pub fn vault_status(state: State<'_, AppState>) -> CmdResult<VaultStatus> {
     state.with_vault(|v| {
         Ok(VaultStatus {
             exists: true,
+            readable: true,
             locked: false,
             path: v.path().display().to_string(),
             vault_id: Some(v.vault_id().to_string()),
@@ -197,9 +207,9 @@ pub fn create_vault(state: State<'_, AppState>, password: String) -> CmdResult<V
 pub fn unlock_vault(state: State<'_, AppState>, password: String) -> CmdResult<VaultStatus> {
     let password = Zeroizing::new(password);
 
-    let mut vault = Vault::open(state.path())?;
-    // On failure the vault is dropped here, so nothing half-opened is retained.
-    vault.unlock(password.as_bytes())?;
+    // Deliberately not `open` + `unlock`: that pair leaks, by timing, whether
+    // the header parsed. See `Vault::open_and_unlock`.
+    let vault = Vault::open_and_unlock(state.path(), password.as_bytes())?;
     state.set_vault(Some(vault))?;
 
     // Resets the 14-day window. A biometric unlock deliberately does not.
@@ -406,6 +416,8 @@ pub struct PermissionState {
 pub struct SettingsDto {
     pub shortcut: String,
     pub clipboard_clear_seconds: u64,
+    pub idle_lock_seconds: u64,
+    pub password_reprompt_days: u64,
     pub default_shortcut: &'static str,
 }
 
@@ -414,6 +426,8 @@ impl From<Settings> for SettingsDto {
         Self {
             shortcut: s.shortcut,
             clipboard_clear_seconds: s.clipboard_clear_seconds,
+            idle_lock_seconds: s.idle_lock_seconds,
+            password_reprompt_days: s.password_reprompt_days,
             default_shortcut: crate::settings::DEFAULT_SHORTCUT,
         }
     }
@@ -539,6 +553,31 @@ pub fn set_shortcut(
         ..current
     };
     Ok(state.set_settings(next)?.into())
+}
+
+/// The idle window before auto-lock. 0 turns the idle timer off; sleep and
+/// screen lock still lock the vault and are not configurable.
+#[tauri::command]
+pub fn set_idle_lock_seconds(state: State<'_, AppState>, seconds: u64) -> CmdResult<SettingsDto> {
+    let current = state.settings()?;
+    let next = Settings {
+        idle_lock_seconds: seconds,
+        ..current
+    };
+    Ok(state.set_settings(next)?.into())
+}
+
+/// The sentence shown after an automatic lock.
+#[tauri::command]
+pub fn lock_reason_message(reason: String) -> String {
+    match reason.as_str() {
+        "idle" => crate::autolock::LockReason::Idle.message().to_string(),
+        "sleep" => crate::autolock::LockReason::Sleep.message().to_string(),
+        "screen_lock" => crate::autolock::LockReason::ScreenLock
+            .message()
+            .to_string(),
+        _ => String::new(),
+    }
 }
 
 #[tauri::command]
@@ -782,4 +821,72 @@ pub fn unlock_with_biometrics(state: State<'_, AppState>) -> CmdResult<Biometric
     Ok(BiometricUnlockOutcome {
         status: vault_status(state)?,
     })
+}
+
+// ====================================================== Phase 5: recovery
+
+/// One rolling snapshot, newest first.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotInfo {
+    /// 1 is the most recent.
+    pub index: usize,
+    pub path: String,
+    /// Unix seconds, or null if the filesystem will not say.
+    pub modified_at: Option<i64>,
+    pub size_bytes: u64,
+}
+
+/// List available snapshots.
+///
+/// Deliberately does **not** require an unlocked vault, or even a readable
+/// one. The case this exists for is a vault too corrupt to open — requiring a
+/// successful unlock first would make recovery impossible exactly when it is
+/// needed.
+#[tauri::command]
+pub fn list_snapshots(state: State<'_, AppState>) -> CmdResult<Vec<SnapshotInfo>> {
+    let mut out = Vec::new();
+    for (i, path) in vault_core::atomic::list_snapshots(state.path())
+        .into_iter()
+        .enumerate()
+    {
+        let meta = std::fs::metadata(&path).ok();
+        let modified_at = meta.as_ref().and_then(|m| m.modified().ok()).and_then(|t| {
+            t.duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .map(|d| d.as_secs() as i64)
+        });
+        out.push(SnapshotInfo {
+            index: i + 1,
+            path: path.display().to_string(),
+            modified_at,
+            size_bytes: meta.map(|m| m.len()).unwrap_or(0),
+        });
+    }
+    Ok(out)
+}
+
+/// Replace the live vault with a snapshot.
+///
+/// The current file is kept alongside as `.prerestore`: recovering from a
+/// corrupt vault should not be the step that destroys the evidence, and a
+/// mistaken restore should be undoable.
+///
+/// Locks first. Restoring underneath an open connection would leave this
+/// process holding a key for a file that no longer exists.
+#[tauri::command]
+pub fn restore_snapshot(state: State<'_, AppState>, index: usize) -> CmdResult<VaultStatus> {
+    state.lock()?;
+    vault_core::atomic::restore_snapshot(state.path(), index)?;
+    vault_status(state)
+}
+
+/// Take a snapshot now. Also reachable from the entry list.
+#[tauri::command]
+pub fn snapshot_now(state: State<'_, AppState>) -> CmdResult<Vec<SnapshotInfo>> {
+    state.with_vault(|v| {
+        v.snapshot()?;
+        Ok(())
+    })?;
+    list_snapshots(state)
 }

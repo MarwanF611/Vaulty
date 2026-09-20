@@ -86,6 +86,42 @@ impl Vault {
         })
     }
 
+    /// Open and unlock in one step, in constant-ish time.
+    ///
+    /// `docs/SECURITY.md` pre-release checklist: "Wrong master password is
+    /// indistinguishable in timing from a corrupt file."
+    ///
+    /// [`Vault::open`] alone cannot satisfy that. It rejects an unreadable
+    /// header in microseconds, while a wrong password costs a full Argon2id
+    /// run — so an attacker holding the file learns from a stopwatch whether
+    /// their tampering broke the header or merely the password. Phase 0 left
+    /// this gap open knowingly; this closes it.
+    ///
+    /// Both paths now run exactly one KDF at production cost: the real one when
+    /// the header parses, a dummy over discarded bytes when it does not. A
+    /// missing file is still reported as such, which is not a leak — the user
+    /// knows whether they have a vault.
+    pub fn open_and_unlock(path: &Path, password: &[u8]) -> Result<Self> {
+        if !path.exists() {
+            return Err(Error::VaultNotFound);
+        }
+
+        match Self::open(path) {
+            Ok(mut vault) => {
+                vault.unlock(password)?;
+                Ok(vault)
+            }
+            Err(Error::VaultNotFound) => Err(Error::VaultNotFound),
+            Err(_) => {
+                // The file is there but unreadable. Spend the same work a real
+                // unlock would, then report the same error a wrong password
+                // gets.
+                burn_one_kdf(password);
+                Err(Error::Auth)
+            }
+        }
+    }
+
     /// Open an existing vault. The returned vault is **locked**.
     pub fn open(path: &Path) -> Result<Self> {
         if !path.exists() {
@@ -499,6 +535,19 @@ impl Drop for Vault {
     fn drop(&mut self) {
         self.lock();
     }
+}
+
+/// Run one Argon2id at production cost and throw the result away.
+///
+/// Exists solely so that the corrupt-file path costs what the wrong-password
+/// path costs. The salt is random because it does not matter what is derived —
+/// only that the same work is done.
+fn burn_one_kdf(password: &[u8]) {
+    let salt = crypto::random_salt();
+    // The result is dropped (and zeroized) immediately. An error here would
+    // mean the default parameters are invalid, which is a build-time bug, not
+    // something to surface at unlock.
+    let _ = crypto::derive_kek(password, &salt, KdfParams::default());
 }
 
 fn meta_from_row(row: &EntryRow) -> Result<EntryMeta> {

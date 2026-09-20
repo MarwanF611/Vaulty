@@ -4,6 +4,8 @@ export const ENTRY_KINDS: EntryKind[] = ['password', 'code', 'note', 'card', 'wi
 
 export interface VaultStatus {
   exists: boolean;
+  /** Whether the vault file can be opened at all. False means offer recovery. */
+  readable: boolean;
   locked: boolean;
   path: string;
   vaultId: string | null;
@@ -137,6 +139,9 @@ export interface PermissionState {
 export interface Settings {
   shortcut: string;
   clipboardClearSeconds: number;
+  /** Idle seconds before auto-lock. 0 disables the idle timer only. */
+  idleLockSeconds: number;
+  passwordRepromptDays: number;
   defaultShortcut: string;
 }
 
@@ -169,4 +174,24 @@ export interface BiometricState {
 
 export interface BiometricUnlockOutcome {
   status: VaultStatus;
+}
+
+// ------------------------------------------------------------ Phase 5
+
+export type LockReason = 'idle' | 'sleep' | 'screen_lock';
+
+export interface LockedPayload {
+  reason: LockReason;
+  message: string;
+}
+
+/** Emitted when the vault locks itself. Must match autolock.rs. */
+export const LOCK_EVENT = 'vaulty://locked';
+
+export interface SnapshotInfo {
+  /** 1 is the most recent. */
+  index: number;
+  path: string;
+  modifiedAt: number | null;
+  sizeBytes: number;
 }

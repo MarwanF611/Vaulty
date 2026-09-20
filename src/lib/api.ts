@@ -9,6 +9,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
   BiometricState,
+  SnapshotInfo,
   BiometricUnlockOutcome,
   CaptureState,
   EntryMeta,
@@ -131,3 +132,21 @@ export const disableBiometrics = () => invoke<BiometricState>('disable_biometric
  */
 export const unlockWithBiometrics = () =>
   invoke<BiometricUnlockOutcome>('unlock_with_biometrics');
+
+// ------------------------------------------------------------ Phase 5
+
+export const setIdleLockSeconds = (seconds: number) =>
+  invoke<Settings>('set_idle_lock_seconds', { seconds });
+
+/**
+ * Snapshots, newest first.
+ *
+ * Works on a vault too corrupt to open — which is the case it exists for.
+ */
+export const listSnapshots = () => invoke<SnapshotInfo[]>('list_snapshots');
+
+/** Replace the live vault with a snapshot. Locks first; keeps the old file. */
+export const restoreSnapshot = (index: number) =>
+  invoke<VaultStatus>('restore_snapshot', { index });
+
+export const snapshotNow = () => invoke<SnapshotInfo[]>('snapshot_now');
