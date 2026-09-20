@@ -1,0 +1,30 @@
+[package]
+name = "vaulty-app"
+description = "Vaulty — Tauri shell around vault-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+# Tauri v2 builds the app as a library so mobile targets can link it.
+name = "vaulty_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+vault-core = { path = "../crates/vault-core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-clipboard-manager = "2"
+uuid.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+# The `test` feature provides the mock runtime used by tests/ipc_boundary.rs.
+tauri = { version = "2", features = ["test"] }
+tempfile = "3.13"
+serde_json.workspace = true
