@@ -24,7 +24,7 @@
       {
         "label": "popup",
         "title": "Vaulty Capture",
-        "url": "popup.html",
+        "url": "popup",
         "width": 520,
         "height": 300,
         "resizable": false,

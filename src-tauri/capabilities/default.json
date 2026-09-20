@@ -1,7 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Minimum permissions for the main window. The clipboard plugin is deliberately absent: copies are performed in Rust so plaintext never reaches the webview.",
-  "windows": ["main"],
-  "permissions": ["core:default"]
+  "description": "Minimum permissions for both windows. The popup must be listed explicitly: a window no capability names gets no permissions, and every invoke from it is denied. The clipboard plugin is deliberately absent - copies are performed in Rust so plaintext never reaches the webview.",
+  "windows": [
+    "main",
+    "popup"
+  ],
+  "permissions": [
+    "core:default"
+  ]
 }
