@@ -8,9 +8,13 @@
  */
 import { invoke } from '@tauri-apps/api/core';
 import type {
+  CaptureState,
   EntryMeta,
   NewEntryInput,
+  PermissionState,
   RevealedSecret,
+  SaveCaptureInput,
+  Settings,
   UpdateEntryInput,
   VaultStatus
 } from './types';
@@ -61,3 +65,43 @@ export const takeSnapshot = () => invoke<string>('take_snapshot');
 
 export const exportEncrypted = (targetPath: string, exportPassword: string) =>
   invoke<void>('export_encrypted', { targetPath, exportPassword });
+
+// ------------------------------------------------------------ Phase 2
+
+export const captureState = () => invoke<CaptureState>('capture_state');
+
+/**
+ * Show the captured text.
+ *
+ * The sibling of `revealSecret`. The capture is the user's own selection, but
+ * it is still plaintext, so it crosses the boundary only when asked for.
+ */
+export const revealCapture = () => invoke<string>('reveal_capture');
+
+/**
+ * Save the pending capture as a new entry.
+ *
+ * The secret is not a parameter: it never leaves Rust. The popup supplies a
+ * label, tags and kind, and the captured text is taken from app state.
+ */
+export const saveCapture = (input: SaveCaptureInput) =>
+  invoke<EntryMeta>('save_capture', { input });
+
+export const discardCapture = () => invoke<void>('discard_capture');
+
+export const hidePopup = () => invoke<void>('hide_popup');
+
+export const permissionState = () => invoke<PermissionState>('permission_state');
+
+export const requestAccessibility = () => invoke<PermissionState>('request_accessibility');
+
+export const openAccessibilitySettings = () =>
+  invoke<void>('open_accessibility_settings');
+
+export const getSettings = () => invoke<Settings>('get_settings');
+
+export const setShortcut = (accelerator: string) =>
+  invoke<Settings>('set_shortcut', { accelerator });
+
+export const setClipboardClearSeconds = (seconds: number) =>
+  invoke<Settings>('set_clipboard_clear_seconds', { seconds });

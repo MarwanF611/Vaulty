@@ -12,6 +12,8 @@
 //! exactly one command returns it. `copy_secret` does not: it writes to the
 //! clipboard from Rust, so a copy never puts the secret in the webview at all.
 
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -20,7 +22,9 @@ use vault_core::{EntryKind, EntryMeta, EntryUpdate, NewEntry, Vault};
 use zeroize::Zeroizing;
 
 use crate::error::{CmdError, CmdResult};
+use crate::settings::Settings;
 use crate::state::AppState;
+use crate::{capture, popup, shortcut};
 
 // ------------------------------------------------------------------- DTOs
 
@@ -315,13 +319,21 @@ pub fn reveal_secret(state: State<'_, AppState>, id: String) -> CmdResult<Reveal
 #[tauri::command]
 pub fn copy_secret(app: tauri::AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
     let id = parse_id(&id)?;
+    let clear_after = Duration::from_secs(state.settings()?.clipboard_clear_seconds);
+
     state.with_vault(|v| {
         let revealed = v.get_entry(&id)?;
         app.clipboard()
             .write_text(revealed.secret.as_str())
             .map_err(|_| CmdError::internal("Could not write to the clipboard."))?;
         Ok(())
-    })
+    })?;
+
+    // SPEC.md: the clipboard auto-clears 30 seconds after a copy. Scheduled
+    // after the write so it can record what the clipboard looked like when we
+    // left it, and leave it alone if the user has copied something since.
+    capture::schedule_clipboard_clear(&app, clear_after);
+    Ok(())
 }
 
 // ------------------------------------------------------------ maintenance
@@ -345,4 +357,191 @@ pub fn export_encrypted(
         v.export_encrypted(std::path::Path::new(&target_path), password.as_bytes())?;
         Ok(())
     })
+}
+
+// ============================================================ Phase 2: capture
+
+/// What the popup is allowed to know about a pending capture.
+///
+/// A character count, not the text. Enough to render a masked preview.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureState {
+    pub has_capture: bool,
+    pub char_count: Option<usize>,
+    pub locked: bool,
+    /// Milliseconds taken by the most recent capture sequence.
+    pub last_capture_ms: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveCaptureInput {
+    pub label: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    pub kind: String,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionState {
+    /// "granted" | "denied" | "not_required" | "unsupported"
+    pub accessibility: &'static str,
+    pub capture_supported: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsDto {
+    pub shortcut: String,
+    pub clipboard_clear_seconds: u64,
+    pub default_shortcut: &'static str,
+}
+
+impl From<Settings> for SettingsDto {
+    fn from(s: Settings) -> Self {
+        Self {
+            shortcut: s.shortcut,
+            clipboard_clear_seconds: s.clipboard_clear_seconds,
+            default_shortcut: crate::settings::DEFAULT_SHORTCUT,
+        }
+    }
+}
+
+#[tauri::command]
+pub fn capture_state(state: State<'_, AppState>) -> CmdResult<CaptureState> {
+    let char_count = state.pending_capture_len()?;
+    Ok(CaptureState {
+        has_capture: char_count.is_some(),
+        char_count,
+        locked: state.is_locked(),
+        last_capture_ms: state.last_capture_ms(),
+    })
+}
+
+/// Show the captured text.
+///
+/// The sibling of `reveal_secret`: the capture is the user's own selection, but
+/// it is still plaintext, so it crosses the boundary only when asked for.
+#[tauri::command]
+pub fn reveal_capture(state: State<'_, AppState>) -> CmdResult<String> {
+    state
+        .with_pending_capture(|c| c.as_str().to_string())?
+        .ok_or_else(|| CmdError::new("no_capture", "There is nothing captured."))
+}
+
+/// Save the pending capture as a new entry.
+///
+/// The secret is never sent from the webview: the popup supplies a label, tags
+/// and kind, and the captured text is taken from Rust-side state. That keeps
+/// the round trip one-way — plaintext goes in via the OS clipboard and out via
+/// the vault, without passing through the renderer.
+#[tauri::command]
+pub fn save_capture(
+    state: State<'_, AppState>,
+    input: SaveCaptureInput,
+) -> CmdResult<EntryMetaDto> {
+    let kind = parse_kind(&input.kind)?;
+    let note = input.note.map(Zeroizing::new);
+
+    let secret = state
+        .with_pending_capture(|c| Zeroizing::new(c.as_str().to_string()))?
+        .ok_or_else(|| CmdError::new("no_capture", "There is nothing captured to save."))?;
+
+    let meta = state.with_vault(|v| {
+        let meta = v.add_entry(NewEntry {
+            label: input.label.clone(),
+            tags: input.tags.clone(),
+            kind,
+            secret: secret.clone(),
+            note: note.clone(),
+        })?;
+        Ok(meta)
+    })?;
+
+    state.discard_capture()?;
+    Ok(meta.into())
+}
+
+/// Throw the capture away and zeroize it. Escape, in other words.
+#[tauri::command]
+pub fn discard_capture(state: State<'_, AppState>) -> CmdResult<()> {
+    state.discard_capture()
+}
+
+#[tauri::command]
+pub fn hide_popup(app: tauri::AppHandle) -> CmdResult<()> {
+    popup::hide(&app);
+    Ok(())
+}
+
+// ------------------------------------------------------------- permissions
+
+#[tauri::command]
+pub fn permission_state() -> PermissionState {
+    PermissionState {
+        accessibility: vault_platform::accessibility_status().as_str(),
+        capture_supported: vault_platform::capture_supported(),
+    }
+}
+
+/// Trigger the OS permission prompt.
+///
+/// macOS shows this once per app bundle; after that the user has to go to
+/// System Settings, which is why `open_accessibility_settings` exists too.
+#[tauri::command]
+pub fn request_accessibility() -> PermissionState {
+    let status = popup::request_permission();
+    PermissionState {
+        accessibility: status.as_str(),
+        capture_supported: vault_platform::capture_supported(),
+    }
+}
+
+#[tauri::command]
+pub fn open_accessibility_settings() -> CmdResult<()> {
+    vault_platform::open_accessibility_settings()
+        .map_err(|_| CmdError::internal("Could not open System Settings."))
+}
+
+// --------------------------------------------------------------- settings
+
+#[tauri::command]
+pub fn get_settings(state: State<'_, AppState>) -> CmdResult<SettingsDto> {
+    Ok(state.settings()?.into())
+}
+
+/// Rebind the global shortcut, rolling back if the OS refuses.
+#[tauri::command]
+pub fn set_shortcut(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    accelerator: String,
+) -> CmdResult<SettingsDto> {
+    let current = state.settings()?;
+
+    shortcut::rebind(&app, &current.shortcut, &accelerator)
+        .map_err(|e| CmdError::new(e.code(), e.message(&accelerator)))?;
+
+    let next = Settings {
+        shortcut: accelerator,
+        ..current
+    };
+    Ok(state.set_settings(next)?.into())
+}
+
+#[tauri::command]
+pub fn set_clipboard_clear_seconds(
+    state: State<'_, AppState>,
+    seconds: u64,
+) -> CmdResult<SettingsDto> {
+    let current = state.settings()?;
+    let next = Settings {
+        clipboard_clear_seconds: seconds,
+        ..current
+    };
+    Ok(state.set_settings(next)?.into())
 }

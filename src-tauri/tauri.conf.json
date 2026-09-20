@@ -20,17 +20,39 @@
         "minHeight": 420,
         "resizable": true,
         "center": true
+      },
+      {
+        "label": "popup",
+        "title": "Vaulty Capture",
+        "url": "popup.html",
+        "width": 520,
+        "height": 300,
+        "resizable": false,
+        "decorations": false,
+        "transparent": false,
+        "center": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": false,
+        "visible": false
       }
     ],
     "security": {
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost",
-      "assetProtocol": { "enable": false }
+      "assetProtocol": {
+        "enable": false
+      }
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.png"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png"
+    ],
     "category": "Utility",
     "shortDescription": "A local-first secrets vault",
     "longDescription": "Select text anywhere, press the shortcut, give it a label - encrypted on disk."

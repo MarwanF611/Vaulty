@@ -3,14 +3,14 @@
 A local-first secrets vault for macOS and Windows. Select text anywhere, press the shortcut,
 give it a label — encrypted on disk. Unlock with Touch ID or Windows Hello.
 
-**Status:** Phase 1 — the crypto core, a manual-testing CLI, and a Tauri desktop app
-with master-password unlock. Biometrics and the global shortcut are not built yet.
+**Status:** Phase 2 — crypto core, CLI, desktop app with master-password unlock, and the
+global shortcut with selection capture. Biometrics is not built yet.
 
 ## Build
 
 ```sh
 npm install
-cargo test --workspace                              # 115 tests
+cargo test --workspace                              # 140 tests
 cargo clippy --workspace --all-targets -- -D warnings
 npm run check                                       # frontend types
 ```
@@ -43,6 +43,7 @@ The CLI is developer tooling for exercising `vault-core` by hand, not a shipped 
 - [`docs/SECURITY.md`](docs/SECURITY.md) — crypto design and threat model
 - [`docs/PHASES.md`](docs/PHASES.md) — build phases and exit criteria
 - [`docs/PHASE0-NOTES.md`](docs/PHASE0-NOTES.md) — header byte format, crate choices, what Phase 0 found
+- [`docs/PHASE2-NOTES.md`](docs/PHASE2-NOTES.md) — the capture sequence, and what it cannot do yet
 
 ## Security, honestly
 

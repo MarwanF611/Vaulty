@@ -1,15 +1,30 @@
 //! Vaulty's Tauri shell.
 //!
 //! Thin by design. Everything that touches key material lives in `vault-core`;
-//! this crate owns the window, the app state, and the IPC boundary.
+//! everything that touches the OS lives in `vault-platform`. This crate owns
+//! the windows, the app state, and the IPC boundary.
+
+mod capture;
+
+/// The capture sequence's wait budget, exposed for the timing test in
+/// `tests/capture_boundary.rs` that guards the 300 ms target.
+pub fn capture_deadline() -> std::time::Duration {
+    capture::CAPTURE_DEADLINE
+}
 
 // Public so the IPC-boundary tests in `tests/` can exercise the real command
 // functions rather than a reimplementation of them.
 pub mod commands;
 pub mod error;
+pub mod popup;
+pub mod settings;
+pub mod shortcut;
 pub mod state;
 
 use std::path::PathBuf;
+
+use tauri::{Manager, WindowEvent};
+use tauri_plugin_global_shortcut::ShortcutState;
 
 use state::AppState;
 
@@ -32,8 +47,23 @@ pub fn run() {
 
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() != ShortcutState::Pressed {
+                        return;
+                    }
+                    // The capture sequence waits on another application to
+                    // service a synthetic Cmd+C, so it must not run on the
+                    // shortcut dispatch thread.
+                    let app = app.clone();
+                    std::thread::spawn(move || popup::on_shortcut(&app));
+                })
+                .build(),
+        )
         .manage(state)
         .invoke_handler(tauri::generate_handler![
+            // Phase 1 — vault lifecycle and entries
             commands::vault_status,
             commands::create_vault,
             commands::unlock_vault,
@@ -48,17 +78,58 @@ pub fn run() {
             commands::copy_secret,
             commands::take_snapshot,
             commands::export_encrypted,
+            // Phase 2 — capture, permissions, settings
+            commands::capture_state,
+            commands::reveal_capture,
+            commands::save_capture,
+            commands::discard_capture,
+            commands::hide_popup,
+            commands::permission_state,
+            commands::request_accessibility,
+            commands::open_accessibility_settings,
+            commands::get_settings,
+            commands::set_shortcut,
+            commands::set_clipboard_clear_seconds,
         ])
+        .setup(|app| {
+            let handle = app.handle();
+
+            // Bind the configured shortcut. A binding another application
+            // already owns is not fatal: the app still works from its window,
+            // and the settings screen reports the conflict so the user can
+            // pick something else (SPEC.md).
+            let configured = app
+                .state::<AppState>()
+                .settings()
+                .map(|s| s.shortcut)
+                .unwrap_or_else(|_| settings::DEFAULT_SHORTCUT.to_string());
+
+            if let Err(e) = shortcut::register(handle, &configured) {
+                eprintln!("vaulty: {}", e.message(&configured));
+            }
+            Ok(())
+        })
         .on_window_event(|window, event| {
-            // Closing the window ends the session. The key is zeroized here
-            // rather than left to process teardown (CLAUDE.md rule 4).
-            //
-            // Idle timeout, system sleep and screen lock are Phase 5.
-            if matches!(event, tauri::WindowEvent::Destroyed) {
-                use tauri::Manager;
-                if let Some(state) = window.app_handle().try_state::<AppState>() {
-                    let _ = state.lock();
-                }
+            if !matches!(
+                event,
+                WindowEvent::Destroyed | WindowEvent::CloseRequested { .. }
+            ) {
+                return;
+            }
+            let Some(state) = window.app_handle().try_state::<AppState>() else {
+                return;
+            };
+
+            if window.label() == popup::POPUP_LABEL {
+                // Dismissing the popup cancels the capture (SPEC.md: zeroized
+                // if the user cancels) but leaves the session alone.
+                let _ = state.discard_capture();
+            } else if matches!(event, WindowEvent::Destroyed) {
+                // Closing the main window ends the session. The key is zeroized
+                // here rather than left to process teardown (CLAUDE.md rule 4).
+                //
+                // Idle timeout, system sleep and screen lock are Phase 5.
+                let _ = state.lock();
             }
         })
         .run(tauri::generate_context!());

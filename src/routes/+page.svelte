@@ -5,12 +5,13 @@
   import Unlock from '$lib/components/Unlock.svelte';
   import EntryForm from '$lib/components/EntryForm.svelte';
   import EntryDetail from '$lib/components/EntryDetail.svelte';
+  import Settings from '$lib/components/Settings.svelte';
 
   let status = $state<VaultStatus | null>(null);
   let entries = $state<EntryMeta[]>([]);
   let selectedId = $state<string | null>(null);
   let query = $state('');
-  let mode = $state<'view' | 'add' | 'edit'>('view');
+  let mode = $state<'view' | 'add' | 'edit' | 'settings'>('view');
   let error = $state('');
   let loading = $state(true);
 
@@ -133,6 +134,7 @@
 
       <footer>
         <button class="ghost lock" onclick={doLock}>Lock vault</button>
+        <button class="ghost lock" onclick={() => (mode = 'settings')}>Settings</button>
         <span class="count muted">{entries.length}</span>
       </footer>
     </aside>
@@ -140,7 +142,9 @@
     <main>
       {#if error}<div class="error">{error}</div>{/if}
 
-      {#if mode === 'add'}
+      {#if mode === 'settings'}
+        <Settings onClose={() => (mode = 'view')} />
+      {:else if mode === 'add'}
         <EntryForm onSaved={onSaved} onCancel={() => (mode = 'view')} />
       {:else if mode === 'edit' && selected}
         <!-- Keyed so switching entries always gets a fresh form rather than

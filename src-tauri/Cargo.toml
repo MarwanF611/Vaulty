@@ -16,8 +16,10 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 vault-core = { path = "../crates/vault-core" }
+vault-platform = { path = "../crates/vault-platform" }
 tauri = { version = "2", features = [] }
 tauri-plugin-clipboard-manager = "2"
+tauri-plugin-global-shortcut = "2"
 uuid.workspace = true
 serde.workspace = true
 serde_json.workspace = true

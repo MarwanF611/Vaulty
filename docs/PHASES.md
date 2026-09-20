@@ -57,12 +57,22 @@ Nothing sensitive appears in the webview devtools.
 
 ## Phase 2 — Global shortcut and capture (1 week)
 
-- [ ] `tauri-plugin-global-shortcut`, default binding, user-configurable, conflict detection
-- [ ] Capture sequence per `docs/SPEC.md` (save clipboard, synthesise copy, read, restore)
-- [ ] Pre-created hidden popup window, always-on-top, appears over any app
-- [ ] Capture mode (text selected) and search mode (nothing selected) in one window
-- [ ] Copy to clipboard with a 30-second auto-clear
-- [ ] macOS Accessibility and Input Monitoring permission flow with an explanation screen
+- [x] `tauri-plugin-global-shortcut`, default binding, user-configurable, conflict detection
+- [x] Capture sequence per `docs/SPEC.md` (save clipboard, synthesise copy, read, restore)
+- [x] Pre-created hidden popup window, always-on-top, appears over any app
+- [x] Capture mode (text selected) and search mode (nothing selected) in one window
+- [x] Copy to clipboard with a 30-second auto-clear
+- [x] macOS Accessibility and Input Monitoring permission flow with an explanation screen
+
+**Status: built.** The clipboard is captured and restored before the popup is shown, so no
+cancel, timeout or crash path can skip the restore. Detection uses the OS clipboard change
+counter rather than clearing the clipboard, so the user's clipboard is never at risk. The
+captured text stays in Rust and the popup sees only a character count.
+140 tests, clippy clean, `npm run check` clean.
+
+**Not yet observed:** the 300 ms figure is instrumented and displayed in the popup, but
+reading it needs a signed build with Accessibility granted and a human pressing the key.
+See `docs/PHASE2-NOTES.md` for that and the other limitations.
 
 **Exit criteria:** under 300 ms from keypress to a usable cursor, measured. The previous
 clipboard is always restored, including when the user cancels.
