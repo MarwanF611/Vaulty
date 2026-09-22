@@ -322,7 +322,16 @@
         </select>
         <input placeholder="tags, comma separated" bind:value={tagsText} disabled={busy} />
       </div>
-      <p class="hint t-footnote tertiary">Return to save · Escape to cancel</p>
+      <!-- The submit button is what makes Return work. Per the HTML spec's
+           implicit-submission rule, a form with no submit button and more than
+           one text field does nothing on Return — and this form has two (label
+           and tags). tests/frontend_forms.rs guards every form against this. -->
+      <div class="foot">
+        <p class="hint t-footnote tertiary">Return to save · Escape to cancel</p>
+        <button type="submit" class="primary" disabled={busy}>
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+      </div>
     </form>
   {:else}
     <div>
@@ -386,6 +395,7 @@
   form, .perm, .popup > div { display: flex; flex-direction: column; gap: var(--s3); }
   .row { display: grid; grid-template-columns: 120px 1fr; gap: var(--s2); }
   .hint { margin: 0; }
+  .foot { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); }
   .big { font-size: 15px; min-height: 30px; }
 
   .captured {

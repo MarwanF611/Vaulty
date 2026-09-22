@@ -118,10 +118,13 @@
               selected.
             </div>
           </div>
-          <input class="accel mono" bind:value={shortcutDraft} disabled={busy}
-            spellcheck="false" />
-          <button onclick={saveShortcut}
-            disabled={busy || shortcutDraft.trim() === settings.shortcut}>Set</button>
+          <!-- A form so Return rebinds, the same as clicking Set. -->
+          <form class="inline" onsubmit={(e) => { e.preventDefault(); void saveShortcut(); }}>
+            <input class="accel mono" bind:value={shortcutDraft} disabled={busy}
+              spellcheck="false" />
+            <button type="submit"
+              disabled={busy || shortcutDraft.trim() === settings.shortcut}>Set</button>
+          </form>
         </div>
       </div>
       <p class="t-footnote tertiary">
@@ -267,6 +270,8 @@
   section { display: flex; flex-direction: column; }
   section > p { margin: var(--s2) 0 0; line-height: 1.5; }
   .accel { width: 170px; flex: none; text-align: center; }
+  /* Lays the form's children out as if they were the row's own. */
+  form.inline { display: contents; }
   .narrow { width: 130px; flex: none; }
   .inline {
     display: inline;
