@@ -64,8 +64,17 @@ Visual Studio and JetBrains IDEs, which is exactly the target audience.
 ### macOS Services entry
 
 Declare an `NSServices` entry in `Info.plist` with `NSSendTypes` of `NSStringPboardType`, so
-"Add to Vault" appears in the right-click Services submenu of every Cocoa app. This is a
+"Add to Vaulty" appears in the right-click Services submenu of every Cocoa app. This is a
 bonus path, not the taught one — it lives under **Services**, which many users never open.
+
+**Built** (pulled forward from after 1.0 at the user's request). Declared in
+`src-tauri/Info.plist`, served by `crates/vault-platform/src/macos_services.rs`, and lands in
+the same capture popup as the shortcut. It is the cleaner of the two paths: AppKit hands
+the selection over on a private pasteboard, so there is no synthetic keystroke, no
+Accessibility permission, and the user's clipboard is never touched.
+
+It only appears for an installed `.app` bundle — macOS reads the declaration from the
+bundle on disk, never from a `tauri dev` binary.
 
 **There is no Windows equivalent.** The shell context menu covers files and folders, not
 arbitrary selected text. Do not promise it, do not build a workaround for it in v1.

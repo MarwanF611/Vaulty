@@ -39,6 +39,8 @@ mod macos;
 mod macos_idle;
 #[cfg(target_os = "macos")]
 mod macos_keychain;
+#[cfg(target_os = "macos")]
+mod macos_services;
 #[cfg(target_os = "windows")]
 #[path = "windows_impl.rs"]
 mod windows_impl;
@@ -88,6 +90,33 @@ impl fmt::Debug for CapturedText {
             .field("chars", &self.char_count())
             .field("text", &"[redacted]")
             .finish()
+    }
+}
+
+/// The Services port name. Must equal `NSPortName` in `src-tauri/Info.plist`.
+pub const SERVICES_PORT_NAME: &str = "Vaulty";
+
+/// The Services message. Must equal `NSMessage` in `src-tauri/Info.plist`;
+/// AppKit appends `:userData:error:` to it to form the selector it sends, which
+/// is the `#[unsafe(method(addToVaulty:userData:error:))]` in macos_services.rs.
+pub const SERVICES_MESSAGE: &str = "addToVaulty";
+
+/// Receive text sent from the right-click "Add to Vaulty" menu item.
+///
+/// macOS only — `docs/SPEC.md` is explicit that Windows has no equivalent for
+/// arbitrary selected text and that no workaround should be built. Returns
+/// whether the handler was installed. Must be called on the main thread.
+pub fn register_services_handler(
+    handler: Box<dyn Fn(CapturedText) + Send + Sync + 'static>,
+) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        macos_services::register(handler)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = handler;
+        false
     }
 }
 

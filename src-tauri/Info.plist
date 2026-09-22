@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    Merged by Tauri into the bundle's Info.plist.
+
+    NSServices puts "Add to Vaulty" in the right-click menu of any app when text
+    is selected (docs/SPEC.md, "macOS Services entry"). macOS reads this from the
+    installed .app bundle - it never appears for a `tauri dev` binary.
+
+    NSPortName and NSMessage must match SERVICES_PORT_NAME and SERVICES_MESSAGE
+    in crates/vault-platform/src/lib.rs. A mismatch fails silently: the menu item
+    shows up and does nothing. src-tauri/tests/window_config.rs checks both.
+  -->
+  <key>NSServices</key>
+  <array>
+    <dict>
+      <key>NSMenuItem</key>
+      <dict>
+        <key>default</key>
+        <string>Add to Vaulty</string>
+      </dict>
+      <key>NSMessage</key>
+      <string>addToVaulty</string>
+      <key>NSPortName</key>
+      <string>Vaulty</string>
+      <key>NSSendTypes</key>
+      <array>
+        <string>public.utf8-plain-text</string>
+        <string>NSStringPboardType</string>
+      </array>
+      <!-- Present-but-empty marks the service as enabled by default rather than
+           leaving it switched off in System Settings until the user finds it. -->
+      <key>NSRequiredContext</key>
+      <dict/>
+    </dict>
+  </array>
+</dict>
+</plist>

@@ -42,6 +42,34 @@ fn resolve_vault_path() -> PathBuf {
     vault_core::default_vault_path().unwrap_or_else(|| PathBuf::from("vault.db"))
 }
 
+/// Route the right-click "Add to Vaulty" item into the capture popup.
+///
+/// AppKit needs the provider registered on the main thread, and early: when a
+/// Services request is what *launches* the app, the request is delivered once
+/// launch finishes, so a provider registered late misses it. `setup` runs on
+/// the main thread, so the direct call normally succeeds; the fallback covers
+/// the case where it does not.
+fn register_services(handle: &tauri::AppHandle) {
+    let make_handler =
+        |app: tauri::AppHandle| -> Box<dyn Fn(vault_platform::CapturedText) + Send + Sync> {
+            Box::new(move |text| {
+                // Leave the AppKit callback promptly — the requesting app is
+                // waiting on it — and drive the window from a worker, exactly as
+                // the shortcut path does.
+                let app = app.clone();
+                std::thread::spawn(move || popup::on_service_text(&app, text));
+            })
+        };
+
+    if vault_platform::register_services_handler(make_handler(handle.clone())) {
+        return;
+    }
+    let for_main = handle.clone();
+    let _ = handle.run_on_main_thread(move || {
+        let _ = vault_platform::register_services_handler(make_handler(for_main));
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let state = AppState::new(resolve_vault_path());
@@ -122,6 +150,8 @@ pub fn run() {
             // Auto-lock runs for the life of the app (SECURITY.md: lock on
             // sleep and screen lock, not only on an idle timer).
             autolock::spawn(handle.clone());
+
+            register_services(handle);
             Ok(())
         })
         .on_window_event(|window, event| {

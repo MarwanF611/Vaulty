@@ -15,7 +15,7 @@ use std::time::Instant;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
-use vault_platform::PermissionStatus;
+use vault_platform::{CapturedText, PermissionStatus};
 
 use crate::capture;
 use crate::state::AppState;
@@ -107,6 +107,58 @@ pub fn on_shortcut(app: &AppHandle) {
         }
     };
 
+    present(
+        app,
+        started,
+        mode,
+        char_count,
+        permission.as_str(),
+        capture_ms,
+        clipboard_restored,
+    );
+}
+
+/// Text arriving from the right-click "Add to Vaulty" Services item.
+///
+/// Lands in the same popup as the shortcut, in capture mode, held in Rust the
+/// same way (CLAUDE.md rule 1). It is the cleaner of the two paths: AppKit
+/// delivers the selection on a private pasteboard, so there was no synthetic
+/// keystroke, no Accessibility check, and the user's clipboard was never
+/// touched — `clipboard_restored` is trivially true because nothing moved.
+pub fn on_service_text(app: &AppHandle, text: CapturedText) {
+    let started = Instant::now();
+    let state = app.state::<AppState>();
+
+    let n = text.char_count();
+    let (mode, char_count) = if state.set_pending_capture(text).is_ok() {
+        (PopupMode::Capture, Some(n))
+    } else {
+        (PopupMode::Search, None)
+    };
+
+    present(
+        app,
+        started,
+        mode,
+        char_count,
+        PermissionStatus::NotRequired.as_str(),
+        None,
+        true,
+    );
+}
+
+/// Show the popup and tell it how to present itself. Shared by both entry
+/// points so they cannot drift in what the popup is told.
+fn present(
+    app: &AppHandle,
+    started: Instant,
+    mode: PopupMode,
+    char_count: Option<usize>,
+    permission: &'static str,
+    capture_ms: Option<u64>,
+    clipboard_restored: bool,
+) {
+    let state = app.state::<AppState>();
     show(app);
 
     let elapsed_ms = millis(started.elapsed());
@@ -116,7 +168,7 @@ pub fn on_shortcut(app: &AppHandle) {
         mode,
         char_count,
         locked: state.is_locked(),
-        permission: permission.as_str(),
+        permission,
         elapsed_ms,
         capture_ms,
         clipboard_restored,

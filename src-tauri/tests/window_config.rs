@@ -193,3 +193,52 @@ fn the_app_crate_declares_the_custom_protocol_feature() {
          embeds the frontend"
     );
 }
+
+/// The `<string>` value that follows `<key>{key}</key>` in `Info.plist`.
+fn plist_string(plist: &str, key: &str) -> Option<String> {
+    let after = plist.split(&format!("<key>{key}</key>")).nth(1)?;
+    let start = after.find("<string>")? + "<string>".len();
+    let end = after[start..].find("</string>")?;
+    Some(after[start..start + end].trim().to_string())
+}
+
+/// The right-click "Add to Vaulty" item is declared in `Info.plist` and served
+/// by an object registered from Rust. The two halves are joined only by these
+/// strings, and a mismatch fails silently: the menu item appears, the user
+/// clicks it, and nothing happens.
+#[test]
+fn the_services_declaration_matches_the_registered_provider() {
+    let plist = include_str!("../Info.plist");
+
+    assert_eq!(
+        plist_string(plist, "NSPortName").as_deref(),
+        Some(vault_platform::SERVICES_PORT_NAME),
+        "Info.plist NSPortName must equal SERVICES_PORT_NAME, or AppKit sends the \
+         request to a port nobody is listening on"
+    );
+    assert_eq!(
+        plist_string(plist, "NSMessage").as_deref(),
+        Some(vault_platform::SERVICES_MESSAGE),
+        "Info.plist NSMessage must equal SERVICES_MESSAGE, or the selector AppKit \
+         sends does not exist on the provider"
+    );
+    assert_eq!(
+        plist_string(plist, "default").as_deref(),
+        Some("Add to Vaulty"),
+        "the menu title users see"
+    );
+    assert!(
+        plist.contains("public.utf8-plain-text"),
+        "the service must accept plain text, or it never appears for a text selection"
+    );
+}
+
+/// The port name is also the product name, which is what users see in the
+/// Services settings list. Keep them from drifting.
+#[test]
+fn the_services_port_is_the_product_name() {
+    assert_eq!(
+        config()["productName"].as_str(),
+        Some(vault_platform::SERVICES_PORT_NAME)
+    );
+}

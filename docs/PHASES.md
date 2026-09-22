@@ -155,7 +155,9 @@ code. 222 tests, clippy clean.
 ## After 1.0, in order
 
 1. TOTP codes
-2. macOS Services menu entry
+2. ~~macOS Services menu entry~~ — **pulled forward and built** at the user's request.
+   Verified end to end on a real bundle: registered with the Services system, invoked via
+   `NSPerformService`, text delivered to the popup. See SPEC.md, "macOS Services entry".
 3. End-to-end encrypted sync — the first paid feature
 4. Browser extension
 
